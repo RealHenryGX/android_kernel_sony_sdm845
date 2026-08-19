@@ -1,0 +1,100 @@
+name: Build KernelSU Kernel (apollo)
+
+on:
+  workflow_dispatch:
+    inputs:
+      defconfig:
+        description: 'Defconfig (arch/arm64/configs/)'
+        required: true
+        default: tama_apollo_dcm_defconfig
+      ksu_tag:
+        description: 'KernelSU tag (last version supporting non-GKI)'
+        required: true
+        default: v0.9.5
+
+env:
+  DEFCONFIG: ${{ github.event.inputs.defconfig }}
+  KSU_TAG: ${{ github.event.inputs.ksu_tag }}
+  STOCK_BOOT_URL: https://github.com/RealHenryGX/android_kernel_sony_sdm845/releases/download/stock-boot-a/boot_a.img
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout kernel source
+        uses: actions/checkout@v5
+
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 8192
+          temp-reserve-mb: 2048
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+
+      - name: Install packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison flex libssl-dev libelf-dev cpio p7zip-full git
+
+      - name: Setup cross toolchain (LLVM + binutils)
+        run: |
+          mkdir -p toolchain && cd toolchain
+          wget -q https://github.com/Mandi-Sa/clang/releases/download/amd64-kernel-arm_static-22/llvm22.0.0-binutils2.44_amd64-kernel-arm_static-20250831.7z
+          7za x llvm22.0.0-binutils2.44_amd64-kernel-arm_static-20250831.7z
+          rm llvm22.0.0-binutils2.44_amd64-kernel-arm_static-20250831.7z
+          echo "$GITHUB_WORKSPACE/toolchain/bin" >> "$GITHUB_PATH"
+
+      - name: Integrate KernelSU ${{ env.KSU_TAG }}
+        run: |
+          git clone --depth 1 --branch "$KSU_TAG" https://github.com/tiann/KernelSU
+          ln -sf ../KernelSU/kernel drivers/kernelsu
+          grep -q "kernelsu" drivers/Makefile || echo 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/Makefile
+          grep -q "drivers/kernelsu/Kconfig" drivers/Kconfig || sed -i '/endmenu/i\source "drivers/kernelsu/Kconfig"' drivers/Kconfig
+          echo "KernelSU at: $(git -C KernelSU rev-parse --short HEAD)"
+
+      - name: Configure kernel
+        run: |
+          export KBUILD_BUILD_TIMESTAMP="$(date)"
+          make -j$(nproc --all) O=out ARCH=arm64 CC=clang CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- "$DEFCONFIG"
+
+      - name: Build kernel (Image.gz-dtb)
+        run: |
+          export KBUILD_BUILD_TIMESTAMP="$(date)"
+          make -j$(nproc --all) O=out ARCH=arm64 CC=clang CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- Image.gz-dtb
+          ls -l out/arch/arm64/boot/
+
+      - name: Fetch stock boot image (ramdisk + header params)
+        run: |
+          wget -q "$STOCK_BOOT_URL" -O boot_stock.img
+          git clone --depth 1 https://github.com/LineageOS/android_system_tools_mkbootimg mkbootimg-tools
+          python3 mkbootimg-tools/unpack_bootimg.py --boot_img boot_stock.img --out boot_unpack
+
+      - name: Repack boot.img with new kernel
+        run: |
+          python3 mkbootimg-tools/mkbootimg.py \
+            --kernel out/arch/arm64/boot/Image.gz-dtb \
+            --ramdisk boot_unpack/ramdisk \
+            --base 0x0 \
+            --kernel_offset 0x8000 \
+            --ramdisk_offset 0x1000000 \
+            --tags_offset 0x100 \
+            --pagesize 4096 \
+            --header_version 1 \
+            --os_version 13.0.0 \
+            --os_patch_level 2023-09 \
+            --cmdline "androidboot.hardware=qcom video=vfb:640x400,bpp=32,memsize=3072000 msm_rtb.filter=0x237 ehci-hcd.park=3 lpm_levels.sleep_disabled=1 service_locator.enable=1 swiotlb=2048 androidboot.configfs=true loop.max_part=7 androidboot.usbcontroller=a600000.dwc3 panic_on_err=1 msm_drm.dsi_display0=dsi_panel_cmd_display:config0 buildvariant=userdebug" \
+            --output boot-kernelSU.img
+          python3 -c "import struct; d=open('boot-kernelSU.img','rb').read(); assert d[:8]==b'ANDROID!','bad magic'; ks,rs=struct.unpack('<II',d[8:16]); hv=struct.unpack('<I',d[1064:1068])[0]; print(f'boot.img OK: {len(d)} bytes, kernel={ks}, ramdisk={rs}, header_v={hv}'); assert ks>10000000 and rs>5000000"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: apollo-${{ env.DEFCONFIG }}-ksu-${{ env.KSU_TAG }}
+          path: |
+            boot-kernelSU.img
+            out/arch/arm64/boot/Image.gz-dtb
+            out/.config
+          compression-level: 6
