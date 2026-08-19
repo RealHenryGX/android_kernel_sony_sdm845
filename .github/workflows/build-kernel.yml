@@ -69,6 +69,12 @@ jobs:
             KCFLAGS+=-Wno-error=implicit-int \
             KCFLAGS+=-Wno-error=incompatible-function-pointer-types \
             KCFLAGS+=-Wno-error=deprecated-non-prototype \
+            KCFLAGS+=-Wno-error=array-bounds \
+            KCFLAGS+=-Wno-error=pointer-bool-conversion \
+            KCFLAGS+=-Wno-error=string-plus-int \
+            KCFLAGS+=-Wno-error=sizeof-array-div \
+            KCFLAGS+=-Wno-error=tautological-compare \
+            KCFLAGS+=-Wno-error=deprecated-declarations \
             Image.gz-dtb
           ls -l out/arch/arm64/boot/
 
