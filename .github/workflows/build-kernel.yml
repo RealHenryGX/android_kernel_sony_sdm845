@@ -80,6 +80,8 @@ jobs:
             KCFLAGS+=-Wno-error=sizeof-array-div \
             KCFLAGS+=-Wno-error=tautological-compare \
             KCFLAGS+=-Wno-error=deprecated-declarations \
+            KCFLAGS+=-Wno-error=strict-prototypes \
+            KCFLAGS+=-Wno-error=date-time \
             Image.gz-dtb
           ls -l out/arch/arm64/boot/
 
