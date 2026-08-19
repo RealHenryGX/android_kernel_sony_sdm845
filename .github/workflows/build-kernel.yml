@@ -21,9 +21,6 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout kernel source
-        uses: actions/checkout@v5
-
       - name: Maximize build space
         uses: easimon/maximize-build-space@master
         with:
@@ -38,6 +35,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y bc bison flex libssl-dev libelf-dev cpio p7zip-full git
+
+      - name: Checkout kernel source
+        uses: actions/checkout@v5
 
       - name: Setup cross toolchain (LLVM + binutils)
         run: |
