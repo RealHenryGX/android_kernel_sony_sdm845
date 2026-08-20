@@ -43,43 +43,23 @@ jobs:
           rm llvm22.0.0-binutils2.44_amd64-kernel-arm_static-20250831.7z
           echo "$GITHUB_WORKSPACE/toolchain/bin" >> "$GITHUB_PATH"
 
-      - name: Integrate SukiSU + SUSFS
+      - name: Integrate KernelSU v0.9.5 + SUSFS
         run: |
-          # SukiSU-Ultra (full clone: need commit count for KSU_VERSION)
-          git clone https://github.com/SukiSU-Ultra/SukiSU-Ultra KernelSU
-          cd KernelSU
-          export KSU_VERSION=$(expr $(git rev-list --count HEAD) "+" 10700)
-          echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
-          sed -i "s/DKSU_VERSION=12800/DKSU_VERSION=${KSU_VERSION}/" kernel/Makefile
-          # 4.9 compat: syscall_fn_t was introduced in Linux 4.19; SukiSU only typedefs it for x86_64
-          sed -i 's|#include <asm/syscall.h>|#include <asm/syscall.h>\n#if defined(__aarch64__)\ntypedef long (*syscall_fn_t)(const struct pt_regs *);\n#endif|' kernel/hook/syscall_hook.h
-          # 4.9 compat: MODULE_IMPORT_NS was introduced in Linux 4.14
-          grep -rl "MODULE_IMPORT_NS" kernel/ | xargs sed -i '/MODULE_IMPORT_NS/d'
-          echo "SukiSU HEAD: $(git rev-parse --short HEAD), KSU_VERSION=$KSU_VERSION"
-          cd ..
-          # 4.9 compat: linux/compiler_types.h was introduced in Linux 4.18 (write into KERNEL root, not KernelSU/)
-          if [ ! -f include/linux/compiler_types.h ]; then echo '#include <linux/compiler.h>' > include/linux/compiler_types.h; fi
-          # 4.9 compat: linux/pgtable.h was introduced in Linux 4.11
-          if [ ! -f include/linux/pgtable.h ]; then echo '#include <asm/pgtable.h>' > include/linux/pgtable.h; fi
-          # 4.9 compat: linux/sched/task_stack.h (sched headers split in 4.11)
-          if [ ! -f include/linux/sched/task_stack.h ]; then mkdir -p include/linux/sched && echo '#include <linux/sched.h>' > include/linux/sched/task_stack.h; fi
+          # Official KernelSU v0.9.5 (last release with non-GKI support; LSM/hlist compatible with 4.9)
+          git clone --depth 1 --branch v0.9.5 https://github.com/tiann/KernelSU KernelSU
+          echo "KernelSU HEAD: $(git -C KernelSU rev-parse --short HEAD)"
           ln -sf ../KernelSU/kernel drivers/kernelsu
           grep -q "kernelsu" drivers/Makefile || echo 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/Makefile
           grep -q "drivers/kernelsu/Kconfig" drivers/Kconfig || sed -i '/endmenu/i\source "drivers/kernelsu/Kconfig"' drivers/Kconfig
-          # SUSFS kernel-4.9 support files
+          # SUSFS (simonpunk/susfs4ksu) kernel-4.9 branch - official patches for 4.9
           git clone -b kernel-4.9 --depth 1 https://gitlab.com/simonpunk/susfs4ksu.git
+          cp susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch KernelSU/
+          (cd KernelSU && patch -p1 --forward < 10_enable_susfs_for_ksu.patch || echo "PATCH_FAILED 10_enable (check .rej)")
+          cp susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.9.patch .
           cp susfs4ksu/kernel_patches/fs/* fs/
           cp susfs4ksu/kernel_patches/include/linux/* include/linux/
-          # Patches from MerCuJerry/sony_apollo_sukisu (proven for this device family)
-          wget -q https://raw.githubusercontent.com/MerCuJerry/sony_apollo_sukisu/main/Patches/ksu-syscall-hooks.patch
-          wget -q https://raw.githubusercontent.com/MerCuJerry/sony_apollo_sukisu/main/Patches/apply-susfs.patch
-          wget -q https://raw.githubusercontent.com/MerCuJerry/sony_apollo_sukisu/main/Patches/ReSukiSU-Manual-hooks.patch
-          wget -q https://raw.githubusercontent.com/MerCuJerry/sony_apollo_sukisu/main/Patches/Static-symbol-export.patch
-          for p in ksu-syscall-hooks.patch apply-susfs.patch ReSukiSU-Manual-hooks.patch Static-symbol-export.patch; do
-            echo "=== applying $p"
-            patch -p1 --forward < "$p" || echo "PATCH_FAILED: $p (check .rej)"
-          done
-          ls fs/*.rej include/linux/*.rej 2>/dev/null || echo "no .rej files (patches clean)"
+          patch -p1 --forward < 50_add_susfs_in_kernel-4.9.patch || echo "PATCH_FAILED 50_add (check .rej)"
+          ls fs/*.rej include/linux/*.rej KernelSU/*.rej 2>/dev/null || echo "no .rej files (patches clean)"
 
       - name: Relax -Werror in vendor drivers (clang22 strictness)
         run: |
