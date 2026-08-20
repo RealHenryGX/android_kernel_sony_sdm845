@@ -53,6 +53,8 @@ jobs:
           sed -i "s/DKSU_VERSION=12800/DKSU_VERSION=${KSU_VERSION}/" kernel/Makefile
           # 4.9 compat: syscall_fn_t was introduced in Linux 4.19; SukiSU only typedefs it for x86_64
           sed -i 's|#include <asm/syscall.h>|#include <asm/syscall.h>\n#if defined(__aarch64__)\ntypedef long (*syscall_fn_t)(const struct pt_regs *);\n#endif|' kernel/hook/syscall_hook.h
+          # 4.9 compat: MODULE_IMPORT_NS was introduced in Linux 4.14
+          grep -rl "MODULE_IMPORT_NS" kernel/ | xargs sed -i '/MODULE_IMPORT_NS/d'
           echo "SukiSU HEAD: $(git rev-parse --short HEAD), KSU_VERSION=$KSU_VERSION"
           cd ..
           ln -sf ../KernelSU/kernel drivers/kernelsu
