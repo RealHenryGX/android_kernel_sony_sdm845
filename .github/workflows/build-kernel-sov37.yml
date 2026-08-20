@@ -170,7 +170,4 @@ jobs:
           fi
           gh release create "$TAG" "${FILES[@]}" \
             --repo "${{ github.repository }}" \
-            --title "Gravity_Ext KernelSU+SUSFS (XZ2/SOV37) - ${DEFCONFIG}" \
-            --notes "**Gravity_Ext** KernelSU+SUSFS (4.9.337 / akari)
-          - 刷入: fastboot 刷 boot-Gravity_Ext-*.img 到非活动槽; AnyKernel3 zip 需 recovery
-          - 回滚: fastboot set_active a"
+            --title "Gravity_Ext KernelSU+SUSFS (XZ2/SOV37) - ${DEFCONFIG}"
