@@ -72,12 +72,16 @@ jobs:
           find drivers techpack -name 'Kbuild' -o -name 'Makefile' | xargs sed -i 's/-Werror\([[:space:]\\]\|$\)/-Wno-error\1/g'
           echo "remaining bare -Werror:"; grep -rn -- '-Werror' drivers techpack 2>/dev/null | grep -v -- '-Werror=' | grep -v -- '-Wno-error' | head -5 || true
 
-      - name: Fix Sony header missing errno include (4.9.337 + clang22)
+      - name: Fix Sony header missing errno include (conditional)
         run: |
-          # ENOTSUP is NOT defined in the 4.9.337 header chain (uapi errno has EOPNOTSUPP only)
-          sed -i 's/return -ENOTSUP;/return -EOPNOTSUPP;/' include/soc/qcom/security_status.h
-          grep -q 'linux/errno.h' include/soc/qcom/security_status.h || sed -i '1i #include <linux/errno.h>' include/soc/qcom/security_status.h
-          grep -n 'EOPNOTSUPP\|errno.h' include/soc/qcom/security_status.h
+          if [ -f include/soc/qcom/security_status.h ]; then
+            # ENOTSUP is NOT defined in the 4.9 header chain (uapi errno has EOPNOTSUPP only)
+            sed -i 's/return -ENOTSUP;/return -EOPNOTSUPP;/' include/soc/qcom/security_status.h
+            grep -q 'linux/errno.h' include/soc/qcom/security_status.h || sed -i '1i #include <linux/errno.h>' include/soc/qcom/security_status.h
+            grep -n 'EOPNOTSUPP\|errno.h' include/soc/qcom/security_status.h
+          else
+            echo "security_status.h not present in this tree; skip"
+          fi
 
       - name: Configure kernel
         run: |
