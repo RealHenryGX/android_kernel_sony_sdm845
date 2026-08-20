@@ -55,10 +55,10 @@ jobs:
           sed -i 's|#include <asm/syscall.h>|#include <asm/syscall.h>\n#if defined(__aarch64__)\ntypedef long (*syscall_fn_t)(const struct pt_regs *);\n#endif|' kernel/hook/syscall_hook.h
           # 4.9 compat: MODULE_IMPORT_NS was introduced in Linux 4.14
           grep -rl "MODULE_IMPORT_NS" kernel/ | xargs sed -i '/MODULE_IMPORT_NS/d'
-          # 4.9 compat: linux/compiler_types.h was introduced in Linux 4.18
-          if [ ! -f include/linux/compiler_types.h ]; then echo '#include <linux/compiler.h>' > include/linux/compiler_types.h; fi
           echo "SukiSU HEAD: $(git rev-parse --short HEAD), KSU_VERSION=$KSU_VERSION"
           cd ..
+          # 4.9 compat: linux/compiler_types.h was introduced in Linux 4.18 (write into KERNEL root, not KernelSU/)
+          if [ ! -f include/linux/compiler_types.h ]; then echo '#include <linux/compiler.h>' > include/linux/compiler_types.h; fi
           ln -sf ../KernelSU/kernel drivers/kernelsu
           grep -q "kernelsu" drivers/Makefile || echo 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/Makefile
           grep -q "drivers/kernelsu/Kconfig" drivers/Kconfig || sed -i '/endmenu/i\source "drivers/kernelsu/Kconfig"' drivers/Kconfig
