@@ -59,6 +59,8 @@ jobs:
           cp susfs4ksu/kernel_patches/fs/* fs/
           cp susfs4ksu/kernel_patches/include/linux/* include/linux/
           patch -p1 --forward < 50_add_susfs_in_kernel-4.9.patch || echo "PATCH_FAILED 50_add (check .rej)"
+          # Manual fixes for hunks that drift on the 4.9.227 baseline (see scripts/fix-susfs-4.9.py)
+          python3 "$GITHUB_WORKSPACE/scripts/fix-susfs-4.9.py"
           ls fs/*.rej include/linux/*.rej KernelSU/*.rej 2>/dev/null || echo "no .rej files (patches clean)"
 
       - name: Relax -Werror in vendor drivers (clang22 strictness)
