@@ -107,13 +107,17 @@ jobs:
             --cmdline "androidboot.hardware=qcom video=vfb:640x400,bpp=32,memsize=3072000 msm_rtb.filter=0x237 ehci-hcd.park=3 lpm_levels.sleep_disabled=1 service_locator.enable=1 swiotlb=2048 androidboot.configfs=true loop.max_part=7 androidboot.usbcontroller=a600000.dwc3 panic_on_err=1 msm_drm.dsi_display0=dsi_panel_cmd_display:config0 buildvariant=userdebug" \
             --output boot-kernelSU.img
           python3 -c "import struct; d=open('boot-kernelSU.img','rb').read(); ks=struct.unpack('<I',d[8:12])[0]; rs=struct.unpack('<I',d[16:20])[0]; hv=struct.unpack('<I',d[40:44])[0]; print(f'boot.img OK: {len(d)} bytes, kernel={ks}, ramdisk={rs}, header_v={hv}'); assert d[:8]==b'ANDROID!' and ks>10000000 and rs>5000000 and hv>=1"
+          # Gravity_Ext naming: {kernel_version}-gravity-{localversion} (no ksu/susfs words - uname detection)
+          REL=$(cat out/include/config/kernel.release | sed 's/+$//')
+          echo "kernel release: $REL"
+          mv boot-kernelSU.img "boot-${REL}.img"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: apollo-${{ env.DEFCONFIG }}-ksu-${{ env.KSU_TAG }}
           path: |
-            boot-kernelSU.img
+            boot-*.img
             out/arch/arm64/boot/Image.gz-dtb
             out/.config
           compression-level: 6
