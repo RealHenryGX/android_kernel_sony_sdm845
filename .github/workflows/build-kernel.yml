@@ -1,4 +1,4 @@
-name: Build KernelSU Kernel (apollo)
+name: Build SukiSU+SUSFS Kernel (apollo)
 
 on:
   workflow_dispatch:
@@ -7,14 +7,9 @@ on:
         description: 'Defconfig (arch/arm64/configs/)'
         required: true
         default: tama_apollo_dcm_defconfig
-      ksu_tag:
-        description: 'KernelSU tag (last version supporting non-GKI)'
-        required: true
-        default: v0.9.5
 
 env:
   DEFCONFIG: ${{ github.event.inputs.defconfig }}
-  KSU_TAG: ${{ github.event.inputs.ksu_tag }}
   STOCK_BOOT_URL: https://github.com/RealHenryGX/android_kernel_sony_sdm845/releases/download/stock-boot-a/boot_a.img
 
 jobs:
@@ -48,13 +43,33 @@ jobs:
           rm llvm22.0.0-binutils2.44_amd64-kernel-arm_static-20250831.7z
           echo "$GITHUB_WORKSPACE/toolchain/bin" >> "$GITHUB_PATH"
 
-      - name: Integrate KernelSU ${{ env.KSU_TAG }}
+      - name: Integrate SukiSU + SUSFS
         run: |
-          git clone --depth 1 --branch "$KSU_TAG" https://github.com/tiann/KernelSU
+          # SukiSU-Ultra (full clone: need commit count for KSU_VERSION)
+          git clone https://github.com/SukiSU-Ultra/SukiSU-Ultra KernelSU
+          cd KernelSU
+          export KSU_VERSION=$(expr $(git rev-list --count HEAD) "+" 10700)
+          echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
+          sed -i "s/DKSU_VERSION=12800/DKSU_VERSION=${KSU_VERSION}/" kernel/Makefile
+          echo "SukiSU HEAD: $(git rev-parse --short HEAD), KSU_VERSION=$KSU_VERSION"
+          cd ..
           ln -sf ../KernelSU/kernel drivers/kernelsu
           grep -q "kernelsu" drivers/Makefile || echo 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/Makefile
           grep -q "drivers/kernelsu/Kconfig" drivers/Kconfig || sed -i '/endmenu/i\source "drivers/kernelsu/Kconfig"' drivers/Kconfig
-          echo "KernelSU at: $(git -C KernelSU rev-parse --short HEAD)"
+          # SUSFS kernel-4.9 support files
+          git clone -b kernel-4.9 --depth 1 https://gitlab.com/simonpunk/susfs4ksu.git
+          cp susfs4ksu/kernel_patches/fs/* fs/
+          cp susfs4ksu/kernel_patches/include/linux/* include/linux/
+          # Patches from MerCuJerry/sony_apollo_sukisu (proven for this device family)
+          wget -q https://raw.githubusercontent.com/MerCuJerry/sony_apollo_sukisu/main/Patches/ksu-syscall-hooks.patch
+          wget -q https://raw.githubusercontent.com/MerCuJerry/sony_apollo_sukisu/main/Patches/apply-susfs.patch
+          wget -q https://raw.githubusercontent.com/MerCuJerry/sony_apollo_sukisu/main/Patches/ReSukiSU-Manual-hooks.patch
+          wget -q https://raw.githubusercontent.com/MerCuJerry/sony_apollo_sukisu/main/Patches/Static-symbol-export.patch
+          for p in ksu-syscall-hooks.patch apply-susfs.patch ReSukiSU-Manual-hooks.patch Static-symbol-export.patch; do
+            echo "=== applying $p"
+            patch -p1 --forward < "$p" || echo "PATCH_FAILED: $p (check .rej)"
+          done
+          ls fs/*.rej include/linux/*.rej 2>/dev/null || echo "no .rej files (patches clean)"
 
       - name: Relax -Werror in vendor drivers (clang22 strictness)
         run: |
@@ -111,7 +126,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: apollo-${{ env.DEFCONFIG }}-ksu-${{ env.KSU_TAG }}
+          name: apollo-${{ env.DEFCONFIG }}-sukiSU-susfs
           path: |
             boot-kernelSU.img
             out/arch/arm64/boot/Image.gz-dtb
