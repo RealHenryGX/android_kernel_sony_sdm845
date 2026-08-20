@@ -37,7 +37,7 @@ jobs:
         run: |
           sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null || true
           timeout 300 sudo apt-get update || true
-          sudo apt-get install -y bc bison flex libssl-dev libelf-dev cpio p7zip-full git
+          sudo apt-get install -y bc bison flex libssl-dev libelf-dev cpio p7zip-full git gcc-arm-linux-gnueabi binutils-arm-linux-gnueabi
 
       - name: Checkout kernel source
         uses: actions/checkout@v5
