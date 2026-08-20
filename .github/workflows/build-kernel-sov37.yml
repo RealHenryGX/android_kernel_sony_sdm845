@@ -1,0 +1,143 @@
+name: Build KernelSU+SUSFS Kernel (XZ2/SOV37 akari)
+
+on:
+  workflow_dispatch:
+    inputs:
+      defconfig:
+        description: 'Defconfig (arch/arm64/configs/)'
+        required: true
+        default: tama_akari_ksu_defconfig
+      stock_boot_url:
+        description: 'Stock boot_a.img URL (ramdisk + header source)'
+        required: false
+        default: https://github.com/RealHenryGX/android_kernel_sony_sdm845/releases/download/stock-boot-a-sov37/sov37_boot_a.img
+
+env:
+  DEFCONFIG: ${{ github.event.inputs.defconfig }}
+  STOCK_BOOT_URL: ${{ github.event.inputs.stock_boot_url }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 8192
+          temp-reserve-mb: 2048
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+
+      - name: Install packages
+        run: |
+          sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null || true
+          timeout 300 sudo apt-get update || true
+          sudo apt-get install -y bc bison flex libssl-dev libelf-dev cpio p7zip-full git
+
+      - name: Checkout kernel source
+        uses: actions/checkout@v5
+
+      - name: Setup cross toolchain (LLVM + binutils)
+        run: |
+          mkdir -p toolchain && cd toolchain
+          wget -q https://github.com/Mandi-Sa/clang/releases/download/amd64-kernel-arm_static-22/llvm22.0.0-binutils2.44_amd64-kernel-arm_static-20250831.7z
+          7za x llvm22.0.0-binutils2.44_amd64-kernel-arm_static-20250831.7z
+          rm llvm22.0.0-binutils2.44_amd64-kernel-arm_static-20250831.7z
+          echo "$GITHUB_WORKSPACE/toolchain/bin" >> "$GITHUB_PATH"
+
+      - name: Integrate KernelSU v0.9.5 + SUSFS
+        run: |
+          # Official KernelSU v0.9.5 (last release with non-GKI support; LSM/hlist compatible with 4.9)
+          git clone --depth 1 --branch v0.9.5 https://github.com/tiann/KernelSU KernelSU
+          echo "KernelSU HEAD: $(git -C KernelSU rev-parse --short HEAD)"
+          ln -sf ../KernelSU/kernel drivers/kernelsu
+          grep -q "kernelsu" drivers/Makefile || echo 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/Makefile
+          grep -q "drivers/kernelsu/Kconfig" drivers/Kconfig || sed -i '/endmenu/i\source "drivers/kernelsu/Kconfig"' drivers/Kconfig
+          # SUSFS (simonpunk/susfs4ksu) kernel-4.9 branch - official patches for 4.9
+          git clone -b kernel-4.9 --depth 1 https://gitlab.com/simonpunk/susfs4ksu.git
+          cp susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch KernelSU/
+          (cd KernelSU && patch -p1 --forward < 10_enable_susfs_for_ksu.patch || echo "PATCH_FAILED 10_enable (check .rej)")
+          cp susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.9.patch .
+          cp susfs4ksu/kernel_patches/fs/* fs/
+          cp susfs4ksu/kernel_patches/include/linux/* include/linux/
+          patch -p1 --forward < 50_add_susfs_in_kernel-4.9.patch || echo "PATCH_FAILED 50_add (check .rej)"
+          # Manual fixes for hunks that drift on the 4.9.337 baseline (see scripts/fix-susfs-337.py)
+          python3 "$GITHUB_WORKSPACE/scripts/fix-susfs-337.py"
+          ls fs/*.rej include/linux/*.rej KernelSU/*.rej 2>/dev/null || echo "no .rej files (patches clean)"
+
+      - name: Relax -Werror in vendor drivers (clang22 strictness)
+        run: |
+          find drivers techpack -name 'Kbuild' -o -name 'Makefile' | xargs sed -i 's/-Werror\([[:space:]\\]\|$\)/-Wno-error\1/g'
+          echo "remaining bare -Werror:"; grep -rn -- '-Werror' drivers techpack 2>/dev/null | grep -v -- '-Werror=' | grep -v -- '-Wno-error' | head -5 || true
+
+      - name: Fix Sony header missing errno include (4.9.337 + clang22)
+        run: |
+          # ENOTSUP is NOT defined in the 4.9.337 header chain (uapi errno has EOPNOTSUPP only)
+          sed -i 's/return -ENOTSUP;/return -EOPNOTSUPP;/' include/soc/qcom/security_status.h
+          grep -q 'linux/errno.h' include/soc/qcom/security_status.h || sed -i '1i #include <linux/errno.h>' include/soc/qcom/security_status.h
+          grep -n 'EOPNOTSUPP\|errno.h' include/soc/qcom/security_status.h
+
+      - name: Configure kernel
+        run: |
+          export KBUILD_BUILD_TIMESTAMP="$(date)"
+          make -j$(nproc --all) O=out ARCH=arm64 CC=clang CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- "$DEFCONFIG"
+
+      - name: Build kernel (Image.gz-dtb)
+        run: |
+          export KBUILD_BUILD_TIMESTAMP="$(date)"
+          make -j$(nproc --all) O=out ARCH=arm64 CC=clang CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            KCFLAGS+=-Wno-error=implicit-function-declaration \
+            KCFLAGS+=-Wno-error=implicit-int \
+            KCFLAGS+=-Wno-error=incompatible-function-pointer-types \
+            KCFLAGS+=-Wno-error=deprecated-non-prototype \
+            KCFLAGS+=-Wno-error=array-bounds \
+            KCFLAGS+=-Wno-error=pointer-bool-conversion \
+            KCFLAGS+=-Wno-error=string-plus-int \
+            KCFLAGS+=-Wno-error=sizeof-array-div \
+            KCFLAGS+=-Wno-error=tautological-compare \
+            KCFLAGS+=-Wno-error=deprecated-declarations \
+            KCFLAGS+=-Wno-error=strict-prototypes \
+            KCFLAGS+=-Wno-error=date-time \
+            Image.gz-dtb
+          ls -l out/arch/arm64/boot/
+
+      - name: Fetch stock boot image (ramdisk + header params)
+        run: |
+          wget -q "$STOCK_BOOT_URL" -O boot_stock.img
+          git clone --depth 1 https://github.com/LineageOS/android_system_tools_mkbootimg mkbootimg-tools
+          python3 mkbootimg-tools/unpack_bootimg.py --boot_img boot_stock.img --out boot_unpack
+
+      - name: Repack boot.img with new kernel
+        run: |
+          # Extract cmdline AND os_version/os_patch_level from the device's own stock boot
+          CMDLINE=$(python3 -c "import struct; d=open('boot_stock.img','rb').read(); print(d[64:64+512].split(b'\x00')[0].decode(errors='replace'))")
+          OS_VER=$(python3 -c "import struct; v=struct.unpack('<I', open('boot_stock.img','rb').read()[44:48])[0]; print(f'{(v>>25)&0x7f}.{(v>>18)&0x7f}.{(v>>11)&0x7f}')")
+          OS_PATCH=$(python3 -c "import struct; v=struct.unpack('<I', open('boot_stock.img','rb').read()[44:48])[0]; print(f'{((v>>4)&0x7f)+2000}-{v&0xf:02d}')")
+          echo "stock cmdline: $CMDLINE"
+          echo "stock os_version: $OS_VER / $OS_PATCH"
+          python3 mkbootimg-tools/mkbootimg.py \
+            --kernel out/arch/arm64/boot/Image.gz-dtb \
+            --ramdisk boot_unpack/ramdisk \
+            --base 0x0 \
+            --kernel_offset 0x8000 \
+            --ramdisk_offset 0x1000000 \
+            --tags_offset 0x100 \
+            --pagesize 4096 \
+            --header_version 1 \
+            --os_version "$OS_VER" \
+            --os_patch_level "$OS_PATCH" \
+            --cmdline "$CMDLINE" \
+            --output boot-kernelSU.img
+          python3 -c "import struct; d=open('boot-kernelSU.img','rb').read(); ks=struct.unpack('<I',d[8:12])[0]; rs=struct.unpack('<I',d[16:20])[0]; hv=struct.unpack('<I',d[40:44])[0]; print(f'boot.img OK: {len(d)} bytes, kernel={ks}, ramdisk={rs}, header_v={hv}'); assert d[:8]==b'ANDROID!' and ks>10000000 and rs>5000000 and hv>=1"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sov37-${{ env.DEFCONFIG }}-ksu-susfs
+          path: |
+            boot-kernelSU.img
+            out/arch/arm64/boot/Image.gz-dtb
+            out/.config
+          compression-level: 6
