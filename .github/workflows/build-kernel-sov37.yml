@@ -112,6 +112,10 @@ jobs:
           wget -q "$STOCK_BOOT_URL" -O boot_stock.img
           git clone --depth 1 https://github.com/LineageOS/android_system_tools_mkbootimg mkbootimg-tools
           python3 mkbootimg-tools/unpack_bootimg.py --boot_img boot_stock.img --out boot_unpack
+          # DTB blobs are hardware descriptions; bootloader picks one via androidboot.dtb_idx,
+          # so keep the STOCK dtb segment (our compiled dtb order differs -> wrong dtb -> gpio panic)
+          python3 scripts/extract_stock_dtb.py boot_stock.img stock_dtb.bin
+          ls -l boot_unpack/ | head
 
       - name: Repack boot.img with new kernel
         run: |
@@ -121,6 +125,9 @@ jobs:
           OS_PATCH=$(python3 -c "import struct; v=struct.unpack('<I', open('boot_stock.img','rb').read()[44:48])[0]; print(f'{((v>>4)&0x7f)+2000}-{v&0xf:02d}')")
           echo "stock cmdline: $CMDLINE"
           echo "stock os_version: $OS_VER / $OS_PATCH"
+          # Repack kernel image: our Image.gz + STOCK dtb segment (dtb order matters for dtb_idx)
+          cat out/arch/arm64/boot/Image.gz stock_dtb.bin > out/arch/arm64/boot/Image.gz-dtb
+          ls -l out/arch/arm64/boot/Image.gz out/arch/arm64/boot/Image.gz-dtb stock_dtb.bin
           python3 mkbootimg-tools/mkbootimg.py \
             --kernel out/arch/arm64/boot/Image.gz-dtb \
             --ramdisk boot_unpack/ramdisk \
