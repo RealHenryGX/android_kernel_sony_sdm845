@@ -16,6 +16,9 @@ env:
   DEFCONFIG: ${{ github.event.inputs.defconfig }}
   STOCK_BOOT_URL: ${{ github.event.inputs.stock_boot_url }}
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
