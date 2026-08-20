@@ -1,0 +1,11 @@
+Gravity_Ext Kernel
+==================
+自制内核项目 (Gravity_Ext)
+
+- KernelSU v0.9.5 + SUSFS v1.5.5 (root + 隐藏)
+- 设备: Sony Xperia XZ2 (akari / SOV37)
+- 基础: LineageOS android_kernel_sony_sdm845 lineage-22.2 (4.9.337)
+- 编译: GitHub Actions, clang 22
+- uname: Linux version 4.9.337-perf+ (gravity@...)
+- 完整 boot.img 见同 Release 的 boot-Gravity_Ext-*.img (fastboot 刷非活动槽)
+- AnyKernel3 zip 需第三方 recovery 执行

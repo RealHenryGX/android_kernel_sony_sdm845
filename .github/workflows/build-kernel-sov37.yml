@@ -136,12 +136,41 @@ jobs:
             --output boot-kernelSU.img
           python3 -c "import struct; d=open('boot-kernelSU.img','rb').read(); ks=struct.unpack('<I',d[8:12])[0]; rs=struct.unpack('<I',d[16:20])[0]; hv=struct.unpack('<I',d[40:44])[0]; print(f'boot.img OK: {len(d)} bytes, kernel={ks}, ramdisk={rs}, header_v={hv}'); assert d[:8]==b'ANDROID!' and ks>10000000 and rs>5000000 and hv>=1"
 
+      - name: Build AnyKernel3 flashable zip (Gravity_Ext)
+        run: |
+          git clone --depth 1 https://github.com/osm0sis/AnyKernel3 ak3
+          cp scripts/ak3/anykernel.sh ak3/anykernel.sh
+          cp scripts/ak3/Gravity_Ext.txt ak3/Gravity_Ext.txt
+          cp out/arch/arm64/boot/Image.gz-dtb ak3/Image.gz-dtb
+          (cd ak3 && zip -r9 ../AnyKernel3-Gravity_Ext.zip . -x '*/.git/*' -x '*.github/*')
+          ls -l AnyKernel3-Gravity_Ext.zip
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: sov37-${{ env.DEFCONFIG }}-ksu-susfs
           path: |
             boot-kernelSU.img
+            AnyKernel3-Gravity_Ext.zip
             out/arch/arm64/boot/Image.gz-dtb
             out/.config
           compression-level: 6
+
+      - name: Publish GitHub Release (Gravity_Ext)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="sov37-ksu-susfs"
+          mv boot-kernelSU.img "boot-Gravity_Ext-${DEFCONFIG}.img"
+          [ -f out/.config ] && cp out/.config "config-${DEFCONFIG}.txt"
+          FILES=("boot-Gravity_Ext-${DEFCONFIG}.img" "out/arch/arm64/boot/Image.gz-dtb" "AnyKernel3-Gravity_Ext.zip")
+          [ -f "config-${DEFCONFIG}.txt" ] && FILES+=("config-${DEFCONFIG}.txt")
+          if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release delete "$TAG" --repo "${{ github.repository }}" --yes
+          fi
+          gh release create "$TAG" "${FILES[@]}" \
+            --repo "${{ github.repository }}" \
+            --title "Gravity_Ext KernelSU+SUSFS (XZ2/SOV37) - ${DEFCONFIG}" \
+            --notes "**Gravity_Ext** KernelSU+SUSFS (4.9.337 / akari)
+          - 刷入: fastboot 刷 boot-Gravity_Ext-*.img 到非活动槽; AnyKernel3 zip 需 recovery
+          - 回滚: fastboot set_active a"
