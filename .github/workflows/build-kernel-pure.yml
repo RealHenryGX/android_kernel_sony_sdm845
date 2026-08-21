@@ -66,6 +66,12 @@ jobs:
             echo "security_status.h not present in this tree; skip"
           fi
 
+      - name: Force vdso32 to use lld (arm32 emulation for COMPAT_VDSO)
+        run: |
+          ls toolchain/bin/ld.lld || echo "WARN: no ld.lld"
+          sed -i 's/-fuse-ld=bfd/-fuse-ld=lld/g' arch/arm64/kernel/vdso32/Makefile
+          grep -n 'fuse-ld' arch/arm64/kernel/vdso32/Makefile
+
       - name: Configure kernel
         run: |
           export KBUILD_BUILD_TIMESTAMP="$(date)"
