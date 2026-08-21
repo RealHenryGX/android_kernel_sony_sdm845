@@ -58,6 +58,11 @@ jobs:
           ln -sf ../KernelSU/kernel drivers/kernelsu
           grep -q "kernelsu" drivers/Makefile || echo 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/Makefile
           grep -q "drivers/kernelsu/Kconfig" drivers/Kconfig || sed -i '/endmenu/i\source "drivers/kernelsu/Kconfig"' drivers/Kconfig
+          # Fix KSU_VERSION: shallow clone + symlink breaks the .git path check in kernel/Makefile,
+          # falling back to KSU_VERSION=16 which is below Manager's MINIMAL_SUPPORTED_KERNEL (11071).
+          # v0.9.5's correct version code is 11872 (matches Manager APK).
+          grep -q 'KSU_VERSION=16' KernelSU/kernel/Makefile && sed -i 's/KSU_VERSION=16/KSU_VERSION=11872/' KernelSU/kernel/Makefile
+          grep -n 'KSU_VERSION' KernelSU/kernel/Makefile | head -2
           # SUSFS (simonpunk/susfs4ksu) kernel-4.9 branch - official patches for 4.9
           git clone -b kernel-4.9 --depth 1 https://gitlab.com/simonpunk/susfs4ksu.git
           cp susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch KernelSU/
