@@ -79,8 +79,8 @@ jobs:
           sed -i 's|force_sig(SIGKILL);|force_sig(SIGKILL, current);|g' drivers/kernelsu/setuid_hook.c
           # 4.9 pkg_observer fsnotify_ops: handle_event (multi-line) via python fixer
           python3 scripts/fix-ksu-v2-4.9.py
-          # 4.9 task_work_add() takes bool notify (TWA_RESUME enum is 5.x+)
-          sed -i 's|task_work_add(tsk, cb, TWA_RESUME)|task_work_add(tsk, cb, true)|' drivers/kernelsu/allowlist.c
+          # 4.9 task_work_add() takes bool notify (TWA_RESUME enum is 5.x+) - all files
+          grep -rl 'TWA_RESUME' drivers/kernelsu/ | xargs -r sed -i 's|TWA_RESUME|true|g'
           # 4.9 has no linux/sched/*.h split headers (5.x+) - flatten to linux/sched.h
           grep -rl "linux/sched/" drivers/kernelsu/ | xargs -r sed -i 's|#include <linux/sched/[^>]*>|#include <linux/sched.h>|'
           # 4.9 compat: syscalls tracepoint requires FTRACE_SYSCALLS (set in defconfig)
