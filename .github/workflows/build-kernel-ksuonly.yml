@@ -1,0 +1,166 @@
+name: Build KernelSU-only Kernel (XZ2/SOV37 akari, compat test)
+
+on:
+  workflow_dispatch:
+    inputs:
+      defconfig:
+        description: 'Defconfig (arch/arm64/configs/)'
+        required: true
+        default: tama_akari_ksu_defconfig
+      stock_boot_url:
+        description: 'Stock boot_a.img URL (ramdisk + header source)'
+        required: false
+        default: https://github.com/RealHenryGX/android_kernel_sony_sdm845/releases/download/stock-boot-a-sov37/sov37_boot_a.img
+
+env:
+  DEFCONFIG: ${{ github.event.inputs.defconfig }}
+  STOCK_BOOT_URL: ${{ github.event.inputs.stock_boot_url }}
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 8192
+          temp-reserve-mb: 2048
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+
+      - name: Install packages
+        run: |
+          sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null || true
+          timeout 300 sudo apt-get update || true
+          sudo apt-get install -y bc bison flex libssl-dev libelf-dev cpio p7zip-full git gcc-arm-linux-gnueabi binutils-arm-linux-gnueabi
+
+      - name: Checkout kernel source
+        uses: actions/checkout@v5
+
+      - name: Setup cross toolchain (LLVM + binutils)
+        run: |
+          mkdir -p toolchain && cd toolchain
+          wget -q https://github.com/Mandi-Sa/clang/releases/download/amd64-kernel-arm_static-22/llvm22.0.0-binutils2.44_amd64-kernel-arm_static-20250831.7z
+          7za x llvm22.0.0-binutils2.44_amd64-kernel-arm_static-20250831.7z
+          rm llvm22.0.0-binutils2.44_amd64-kernel-arm_static-20250831.7z
+          echo "$GITHUB_WORKSPACE/toolchain/bin" >> "$GITHUB_PATH"
+
+      - name: Integrate KernelSU v0.9.5 (no SUSFS)
+        run: |
+          git clone --depth 1 --branch v0.9.5 https://github.com/tiann/KernelSU.git
+          ln -sf ../KernelSU/kernel drivers/kernelsu
+          grep -q "kernelsu" drivers/Makefile || echo 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/Makefile
+          grep -q "drivers/kernelsu/Kconfig" drivers/Kconfig || sed -i '/endmenu/i\source "drivers/kernelsu/Kconfig"' drivers/Kconfig
+          grep -q 'KSU_VERSION=16' KernelSU/kernel/Makefile && sed -i 's/KSU_VERSION=16/KSU_VERSION=11872/' KernelSU/kernel/Makefile
+      - name: Relax -Werror in vendor drivers (clang22 strictness)
+        run: |
+          find drivers techpack -name 'Kbuild' -o -name 'Makefile' | xargs sed -i 's/-Werror\([[:space:]\\]\|$\)/-Wno-error\1/g'
+          echo "remaining bare -Werror:"; grep -rn -- '-Werror' drivers techpack 2>/dev/null | grep -v -- '-Werror=' | grep -v -- '-Wno-error' | head -5 || true
+
+      - name: Fix Sony header missing errno include (conditional)
+        run: |
+          if [ -f include/soc/qcom/security_status.h ]; then
+            # ENOTSUP is NOT defined in the 4.9 header chain (uapi errno has EOPNOTSUPP only)
+            sed -i 's/return -ENOTSUP;/return -EOPNOTSUPP;/' include/soc/qcom/security_status.h
+            grep -q 'linux/errno.h' include/soc/qcom/security_status.h || sed -i '1i #include <linux/errno.h>' include/soc/qcom/security_status.h
+            grep -n 'EOPNOTSUPP\|errno.h' include/soc/qcom/security_status.h
+          else
+            echo "security_status.h not present in this tree; skip"
+          fi
+
+      - name: Force vdso32 to use lld (arm32 emulation for COMPAT_VDSO)
+        run: |
+          ls toolchain/bin/ld.lld || echo "WARN: no ld.lld"
+          sed -i 's/-fuse-ld=bfd/-fuse-ld=lld/g' arch/arm64/kernel/vdso32/Makefile
+          grep -n 'fuse-ld' arch/arm64/kernel/vdso32/Makefile
+
+      - name: Configure kernel
+        run: |
+          export KBUILD_BUILD_TIMESTAMP="$(date)"
+          make -j$(nproc --all) O=out ARCH=arm64 CC=clang CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- "$DEFCONFIG"
+
+      - name: Build kernel (Image.gz-dtb)
+        run: |
+          export KBUILD_BUILD_TIMESTAMP="$(date)"
+          make -j$(nproc --all) O=out ARCH=arm64 CC=clang CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            KCFLAGS+=-Wno-error=implicit-function-declaration \
+            KCFLAGS+=-Wno-error=implicit-int \
+            KCFLAGS+=-Wno-error=incompatible-function-pointer-types \
+            KCFLAGS+=-Wno-error=deprecated-non-prototype \
+            KCFLAGS+=-Wno-error=array-bounds \
+            KCFLAGS+=-Wno-error=pointer-bool-conversion \
+            KCFLAGS+=-Wno-error=string-plus-int \
+            KCFLAGS+=-Wno-error=sizeof-array-div \
+            KCFLAGS+=-Wno-error=tautological-compare \
+            KCFLAGS+=-Wno-error=deprecated-declarations \
+            KCFLAGS+=-Wno-error=strict-prototypes \
+            KCFLAGS+=-Wno-error=date-time \
+            Image.gz-dtb
+          ls -l out/arch/arm64/boot/
+
+      - name: Fetch stock boot image (ramdisk + header params)
+        run: |
+          wget -q "$STOCK_BOOT_URL" -O boot_stock.img
+          git clone --depth 1 https://github.com/LineageOS/android_system_tools_mkbootimg mkbootimg-tools
+          python3 mkbootimg-tools/unpack_bootimg.py --boot_img boot_stock.img --out boot_unpack
+          # DTB blobs are hardware descriptions; bootloader picks one via androidboot.dtb_idx,
+          # so keep the STOCK dtb segment (our compiled dtb order differs -> wrong dtb -> gpio panic)
+          python3 scripts/extract_stock_dtb.py boot_stock.img stock_dtb.bin
+          ls -l boot_unpack/ | head
+
+      - name: Repack boot.img with new kernel
+        run: |
+          # Extract cmdline AND os_version/os_patch_level from the device's own stock boot
+          CMDLINE=$(python3 -c "import struct; d=open('boot_stock.img','rb').read(); print(d[64:64+512].split(b'\x00')[0].decode(errors='replace'))")
+          OS_VER=$(python3 -c "import struct; v=struct.unpack('<I', open('boot_stock.img','rb').read()[44:48])[0]; print(f'{(v>>25)&0x7f}.{(v>>18)&0x7f}.{(v>>11)&0x7f}')")
+          OS_PATCH=$(python3 -c "import struct; v=struct.unpack('<I', open('boot_stock.img','rb').read()[44:48])[0]; print(f'{((v>>4)&0x7f)+2000}-{v&0xf:02d}')")
+          echo "stock cmdline: $CMDLINE"
+          echo "stock os_version: $OS_VER / $OS_PATCH"
+          # Repack kernel image: our Image.gz + STOCK dtb segment (dtb order matters for dtb_idx)
+          cat out/arch/arm64/boot/Image.gz stock_dtb.bin > out/arch/arm64/boot/Image.gz-dtb
+          ls -l out/arch/arm64/boot/Image.gz out/arch/arm64/boot/Image.gz-dtb stock_dtb.bin
+          python3 mkbootimg-tools/mkbootimg.py \
+            --kernel out/arch/arm64/boot/Image.gz-dtb \
+            --ramdisk boot_unpack/ramdisk \
+            --base 0x0 \
+            --kernel_offset 0x8000 \
+            --ramdisk_offset 0x1000000 \
+            --tags_offset 0x100 \
+            --pagesize 4096 \
+            --header_version 1 \
+            --os_version "$OS_VER" \
+            --os_patch_level "$OS_PATCH" \
+            --cmdline "$CMDLINE" \
+            --output boot-kernelSU.img
+          python3 -c "import struct; d=open('boot-kernelSU.img','rb').read(); ks=struct.unpack('<I',d[8:12])[0]; rs=struct.unpack('<I',d[16:20])[0]; hv=struct.unpack('<I',d[40:44])[0]; print(f'boot.img OK: {len(d)} bytes, kernel={ks}, ramdisk={rs}, header_v={hv}'); assert d[:8]==b'ANDROID!' and ks>10000000 and rs>5000000 and hv>=1"
+
+          # Gravity_Ext naming: {kernel_version}-gravity-{localversion} (no ksu/susfs words - uname detection)
+          REL=$(cat out/include/config/kernel.release | sed 's/+$//')
+          echo "kernel release: $REL"
+          mv boot-kernelSU.img "boot-${REL}.img"
+
+      - name: Build AnyKernel3 flashable zip (Gravity_Ext)
+        run: |
+          git clone --depth 1 https://github.com/osm0sis/AnyKernel3 ak3
+          cp scripts/ak3/anykernel.sh ak3/anykernel.sh
+          cp scripts/ak3/Gravity_Ext.txt ak3/Gravity_Ext.txt
+          cp out/arch/arm64/boot/Image.gz-dtb ak3/Image.gz-dtb
+          REL=$(cat out/include/config/kernel.release | sed 's/+$//')
+          (cd ak3 && zip -r9 "../AnyKernel3-Gravity_Ext-${REL}.zip" . -x '*/.git/*' -x '*.github/*')
+          ls -l AnyKernel3-Gravity_Ext-*.zip
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sov37-${{ env.DEFCONFIG }}-ksuonly
+          path: |
+            boot-*.img
+            AnyKernel3-Gravity_Ext-*.zip
+            out/arch/arm64/boot/Image.gz-dtb
+            out/.config
+          compression-level: 6
