@@ -43,6 +43,9 @@ static const struct fsnotify_ops ksu_ops = {
 #endif"""
 patch_file('pkg_observer.c', old_ops, new_ops)
 
+# 4.9 fsnotify_init_mark takes (mark, free_mark_cb) - group binding is 5.x+
+patch_file('pkg_observer.c', 'fsnotify_init_mark(m, g);', 'fsnotify_init_mark(m, NULL);')
+
 # 4.9 fsnotify_alloc_group takes one arg (no flags) - the code already #if's on 6.0, fine.
 
 if errors:
