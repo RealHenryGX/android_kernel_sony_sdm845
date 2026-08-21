@@ -46,6 +46,17 @@ patch_file('pkg_observer.c', old_ops, new_ops)
 # 4.9 fsnotify_init_mark takes (mark, free_mark_cb) - group binding is 5.x+
 patch_file('pkg_observer.c', 'fsnotify_init_mark(m, g);', 'fsnotify_init_mark(m, NULL);')
 
+# ---- seccomp_cache.c: 5.x+ internals (refcount_t, SECCOMP_ARCH_NATIVE_NR, redefines
+#      struct seccomp_filter) - disabled on 4.9 (pure optimization, setuid_hook still works)
+patch_file('Makefile', 'kernelsu-objs += seccomp_cache.o\n', '')
+patch_file('setuid_hook.c', '#include "seccomp_cache.h"\n', '')
+patch_file('setuid_hook.c',
+           '        ksu_seccomp_allow_cache(current->seccomp.filter, __NR_reboot);\n',
+           '        /* 4.9: seccomp_cache disabled */\n')
+patch_file('setuid_hook.c',
+           '            ksu_seccomp_allow_cache(current->seccomp.filter, __NR_reboot);\n',
+           '            /* 4.9: seccomp_cache disabled */\n')
+
 # 4.9 fsnotify_alloc_group takes one arg (no flags) - the code already #if's on 6.0, fine.
 
 if errors:
