@@ -68,6 +68,8 @@ jobs:
           # MODULE_IMPORT_NS is 5.14+; 4.9 has no such macro - comment both branches
           sed -i 's|MODULE_IMPORT_NS(|// MODULE_IMPORT_NS(|' drivers/kernelsu/core/init.c
           grep -n "MODULE_IMPORT_NS" drivers/kernelsu/core/init.c | head -4
+          # 4.9 has no linux/compiler_types.h (5.1+) - use linux/compiler.h
+          grep -rl "linux/compiler_types.h" drivers/kernelsu/ | xargs -r sed -i 's|#include <linux/compiler_types.h>|#include <linux/compiler.h>|'
 
       - name: Relax -Werror in vendor drivers (clang22 strictness)
         run: |
