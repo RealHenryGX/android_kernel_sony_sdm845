@@ -7,6 +7,10 @@ on:
         description: 'Defconfig (arch/arm64/configs/)'
         required: true
         default: tama_akari_ksu_defconfig
+      with_ksu:
+        description: 'Integrate KernelSU+SUSFS (true/false)'
+        required: false
+        default: 'true'
       stock_boot_url:
         description: 'Stock boot_a.img URL (ramdisk + header source)'
         required: false
@@ -51,6 +55,7 @@ jobs:
           echo "$GITHUB_WORKSPACE/toolchain/bin" >> "$GITHUB_PATH"
 
       - name: Integrate KernelSU v0.9.5 + SUSFS
+        if: ${{ github.event.inputs.with_ksu == 'true' }}
         run: |
           # Official KernelSU v0.9.5 (last release with non-GKI support; LSM/hlist compatible with 4.9)
           git clone --depth 1 --branch v0.9.5 https://github.com/tiann/KernelSU KernelSU
