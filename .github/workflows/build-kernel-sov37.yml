@@ -61,6 +61,13 @@ jobs:
           grep -q "drivers/kernelsu/Kconfig" drivers/Kconfig || sed -i '/endmenu/i\source "drivers/kernelsu/Kconfig"' drivers/Kconfig
           grep -n "config KSU" drivers/kernelsu/Kconfig | head -2
           ls drivers/kernelsu/*.c | head -5
+          # ---- 4.9 compat fixes for KSU v3 (iterative) ----
+          # arm64: define syscall_fn_t (4.9 has no sys_call_ptr_t on arm64)
+          sed -i 's|#if defined(__x86_64__)|#if defined(__x86_64__) \|\| defined(__aarch64__)|' drivers/kernelsu/hook/syscall_hook.h
+          sed -i 's|typedef sys_call_ptr_t syscall_fn_t;|#if defined(__aarch64__)\ntypedef asmlinkage long (*syscall_fn_t)(const struct pt_regs *);\n#else\ntypedef sys_call_ptr_t syscall_fn_t;\n#endif|' drivers/kernelsu/hook/syscall_hook.h
+          # MODULE_IMPORT_NS is 5.14+; 4.9 has no such macro - comment both branches
+          sed -i 's|MODULE_IMPORT_NS(|// MODULE_IMPORT_NS(|' drivers/kernelsu/core/init.c
+          grep -n "MODULE_IMPORT_NS" drivers/kernelsu/core/init.c | head -4
 
       - name: Relax -Werror in vendor drivers (clang22 strictness)
         run: |
