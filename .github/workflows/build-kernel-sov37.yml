@@ -56,6 +56,7 @@ jobs:
           git clone --depth 1 --branch v3.2.5 https://github.com/tiann/KernelSU KernelSU
           echo "KernelSU HEAD: $(git -C KernelSU rev-parse --short HEAD)"
           cp -r KernelSU/kernel drivers/kernelsu
+          cp -r KernelSU/uapi drivers/kernelsu/uapi
           grep -q "kernelsu" drivers/Makefile || echo 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/Makefile
           grep -q "drivers/kernelsu/Kconfig" drivers/Kconfig || sed -i '/endmenu/i\source "drivers/kernelsu/Kconfig"' drivers/Kconfig
           grep -n "config KSU" drivers/kernelsu/Kconfig | head -2
