@@ -1,4 +1,4 @@
-name: Build KernelSU+SUSFS Kernel (XZ2/SOV37 akari)
+name: Build Pure Kernel (XZ2/SOV37, no KSU - compat test)
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
       defconfig:
         description: 'Defconfig (arch/arm64/configs/)'
         required: true
-        default: tama_akari_ksu_defconfig
+        default: tama_akari_defconfig
       stock_boot_url:
         description: 'Stock boot_a.img URL (ramdisk + header source)'
         required: false
@@ -49,26 +49,6 @@ jobs:
           7za x llvm22.0.0-binutils2.44_amd64-kernel-arm_static-20250831.7z
           rm llvm22.0.0-binutils2.44_amd64-kernel-arm_static-20250831.7z
           echo "$GITHUB_WORKSPACE/toolchain/bin" >> "$GITHUB_PATH"
-
-      - name: Integrate KernelSU v0.9.5 + SUSFS
-        run: |
-          # Official KernelSU v0.9.5 (last release with non-GKI support; LSM/hlist compatible with 4.9)
-          git clone --depth 1 --branch v0.9.5 https://github.com/tiann/KernelSU KernelSU
-          echo "KernelSU HEAD: $(git -C KernelSU rev-parse --short HEAD)"
-          ln -sf ../KernelSU/kernel drivers/kernelsu
-          grep -q "kernelsu" drivers/Makefile || echo 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/Makefile
-          grep -q "drivers/kernelsu/Kconfig" drivers/Kconfig || sed -i '/endmenu/i\source "drivers/kernelsu/Kconfig"' drivers/Kconfig
-          # SUSFS (simonpunk/susfs4ksu) kernel-4.9 branch - official patches for 4.9
-          git clone -b kernel-4.9 --depth 1 https://gitlab.com/simonpunk/susfs4ksu.git
-          cp susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch KernelSU/
-          (cd KernelSU && patch -p1 --forward < 10_enable_susfs_for_ksu.patch || echo "PATCH_FAILED 10_enable (check .rej)")
-          cp susfs4ksu/kernel_patches/50_add_susfs_in_kernel-4.9.patch .
-          cp susfs4ksu/kernel_patches/fs/* fs/
-          cp susfs4ksu/kernel_patches/include/linux/* include/linux/
-          patch -p1 --forward < 50_add_susfs_in_kernel-4.9.patch || echo "PATCH_FAILED 50_add (check .rej)"
-          # Manual fixes for hunks that drift on the 4.9.337 baseline (see scripts/fix-susfs-337.py)
-          python3 "$GITHUB_WORKSPACE/scripts/fix-susfs-337.py"
-          ls fs/*.rej include/linux/*.rej KernelSU/*.rej 2>/dev/null || echo "no .rej files (patches clean)"
 
       - name: Relax -Werror in vendor drivers (clang22 strictness)
         run: |
@@ -164,7 +144,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: sov37-${{ env.DEFCONFIG }}-ksu-susfs
+          name: sov37-pure-${{ env.DEFCONFIG }}
           path: |
             boot-*.img
             AnyKernel3-Gravity_Ext-*.zip
