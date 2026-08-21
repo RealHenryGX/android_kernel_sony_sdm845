@@ -62,6 +62,10 @@ jobs:
           ls drivers/kernelsu/*.c | head -5
           # 4.9 compat: MODULE_IMPORT_NS is 6.13+ - comment out (module ns not needed in-kernel)
           sed -i 's|MODULE_IMPORT_NS(|// MODULE_IMPORT_NS(|' drivers/kernelsu/ksu.c
+          # 4.9 has no linux/compiler_types.h (5.1+) - use linux/compiler.h
+          grep -rl "linux/compiler_types.h" drivers/kernelsu/ | xargs -r sed -i 's|#include <linux/compiler_types.h>|#include <linux/compiler.h>|'
+          # 4.9 has no linux/pgtable.h (5.7+) - use asm/pgtable.h
+          grep -rl "linux/pgtable.h" drivers/kernelsu/ | xargs -r sed -i 's|#include <linux/pgtable.h>|#include <asm/pgtable.h>|'
           # 4.9 compat: syscalls tracepoint requires FTRACE_SYSCALLS (set in defconfig)
 
       - name: Relax -Werror in vendor drivers (clang22 strictness)
