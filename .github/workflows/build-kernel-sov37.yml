@@ -73,6 +73,8 @@ jobs:
           # allowlist.c: TWA_RESUME lives in linux/sched.h on 4.9; cast key for clang22 strictness
           grep -q "linux/sched.h" drivers/kernelsu/allowlist.c || sed -i 's|#include <linux/mutex.h>|#include <linux/mutex.h>\n#include <linux/sched.h>|' drivers/kernelsu/allowlist.c
           sed -i 's|p->profile.key, p->profile.current_uid|(const char *)p->profile.key, p->profile.current_uid|g' drivers/kernelsu/allowlist.c
+          # 4.9 task_work_add() takes bool notify (TWA_RESUME enum is 5.x+)
+          sed -i 's|task_work_add(tsk, cb, TWA_RESUME)|task_work_add(tsk, cb, true)|' drivers/kernelsu/allowlist.c
           # 4.9 compat: syscalls tracepoint requires FTRACE_SYSCALLS (set in defconfig)
 
       - name: Relax -Werror in vendor drivers (clang22 strictness)
