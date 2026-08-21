@@ -60,6 +60,8 @@ jobs:
           grep -q "drivers/kernelsu/Kconfig" drivers/Kconfig || sed -i '/endmenu/i\source "drivers/kernelsu/Kconfig"' drivers/Kconfig
           grep -n "config KSU" drivers/kernelsu/Kconfig | head -2
           ls drivers/kernelsu/*.c | head -5
+          # 4.9 compat: MODULE_IMPORT_NS is 6.13+ - comment out (module ns not needed in-kernel)
+          sed -i 's|MODULE_IMPORT_NS(|// MODULE_IMPORT_NS(|' drivers/kernelsu/ksu.c
           # 4.9 compat: syscalls tracepoint requires FTRACE_SYSCALLS (set in defconfig)
 
       - name: Relax -Werror in vendor drivers (clang22 strictness)
