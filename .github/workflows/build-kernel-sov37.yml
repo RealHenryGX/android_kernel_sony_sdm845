@@ -75,6 +75,8 @@ jobs:
           sed -i 's|p->profile.key, p->profile.current_uid|(const char *)p->profile.key, p->profile.current_uid|g' drivers/kernelsu/allowlist.c
           # 4.9 seccomp has no filter_count member (5.11+) - drop that line
           sed -i '/atomic_set(&current->seccomp.filter_count, 0);/d' drivers/kernelsu/app_profile.c
+          # 4.9 pkg_observer fsnotify_ops: handle_event (multi-line) via python fixer
+          python3 scripts/fix-ksu-v2-4.9.py
           # 4.9 task_work_add() takes bool notify (TWA_RESUME enum is 5.x+)
           sed -i 's|task_work_add(tsk, cb, TWA_RESUME)|task_work_add(tsk, cb, true)|' drivers/kernelsu/allowlist.c
           # 4.9 has no linux/sched/*.h split headers (5.x+) - flatten to linux/sched.h
