@@ -66,6 +66,9 @@ jobs:
           grep -rl "linux/compiler_types.h" drivers/kernelsu/ | xargs -r sed -i 's|#include <linux/compiler_types.h>|#include <linux/compiler.h>|'
           # 4.9 has no linux/pgtable.h (5.7+) - use asm/pgtable.h
           grep -rl "linux/pgtable.h" drivers/kernelsu/ | xargs -r sed -i 's|#include <linux/pgtable.h>|#include <asm/pgtable.h>|'
+          # allowlist.c: TWA_RESUME lives in linux/sched.h on 4.9; cast key for clang22 strictness
+          grep -q "linux/sched.h" drivers/kernelsu/allowlist.c || sed -i 's|#include <linux/mutex.h>|#include <linux/mutex.h>\n#include <linux/sched.h>|' drivers/kernelsu/allowlist.c
+          sed -i 's|p->profile.key, p->profile.current_uid|(const char *)p->profile.key, p->profile.current_uid|g' drivers/kernelsu/allowlist.c
           # 4.9 compat: syscalls tracepoint requires FTRACE_SYSCALLS (set in defconfig)
 
       - name: Relax -Werror in vendor drivers (clang22 strictness)
