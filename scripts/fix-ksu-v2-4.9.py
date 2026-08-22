@@ -74,9 +74,16 @@ _s = _s.replace('''#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)
 ''', '')
 _s = _s.replace('\tp->ops.remap_file_range = fp->f_op->remap_file_range ? ksu_wrapper_remap_file_range : NULL;\n', '')
 _s = _s.replace('\tp->ops.fadvise = fp->f_op->fadvise ? ksu_wrapper_fadvise : NULL;\n', '')
+# remove the whole iopoll wrapper (both #if/#else branches) - 4.9 fops has no iopoll member
+_s = _re.sub(r'#if LINUX_VERSION_CODE >= KERNEL_VERSION\(6, 1, 0\)\nstatic int ksu_wrapper_iopoll.*?\n#endif\n', '', _s, flags=_re.S)
+# __poll_t is 5.x+; 4.9 poll() returns unsigned int
+_s = _s.replace('static __poll_t ksu_wrapper_poll', 'static unsigned int ksu_wrapper_poll')
 # iopoll wrapper fn stays inside #if LINUX_VERSION_CODE >= 6.1 - not compiled on 4.9, no unused warning
 open(os.path.join(BASE, _fw), 'w', encoding='utf-8', newline='\n').write(_s)
 print('patched file_wrapper.c')
+
+# ---- ksud.c: strncpy_from_user_nofault is 5.x+; 4.9 uses strncpy_from_user
+patch_file('ksud.c', 'strncpy_from_user_nofault', 'strncpy_from_user')
 
 # 4.9 fsnotify_alloc_group takes one arg (no flags) - the code already #if's on 6.0, fine.
 
