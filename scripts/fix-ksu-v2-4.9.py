@@ -82,8 +82,15 @@ _s = _s.replace('static __poll_t ksu_wrapper_poll', 'static unsigned int ksu_wra
 open(os.path.join(BASE, _fw), 'w', encoding='utf-8', newline='\n').write(_s)
 print('patched file_wrapper.c')
 
-# ---- ksud.c: strncpy_from_user_nofault is 5.x+; 4.9 uses strncpy_from_user
-patch_file('ksud.c', 'strncpy_from_user_nofault', 'strncpy_from_user')
+# ---- ksud.c etc: strncpy_from_user_nofault is 5.x+; 4.9 uses strncpy_from_user (ALL files, ALL occurrences)
+for _f in os.listdir(os.path.join(BASE)):
+    if _f.endswith('.c'):
+        _p = os.path.join(BASE, _f)
+        _s = open(_p, encoding='utf-8', errors='replace').read()
+        if 'strncpy_from_user_nofault' in _s:
+            open(_p, 'w', encoding='utf-8', newline='\n').write(
+                _s.replace('strncpy_from_user_nofault', 'strncpy_from_user'))
+            print(f'patched {_f} (nofault)')
 
 # ---- selinux/selinux.c: selinux_state global is 5.x+; 4.9 no-op setenforce/getenforce=true
 _sel = 'selinux/selinux.c'
@@ -133,13 +140,111 @@ _ss = _ss.replace('''bool getenforce()
 }''')
 _ss = _ss.replace('    return security_release_secctx(cp->context, cp->len);',
                   '    security_release_secctx(cp->context, cp->len);')
+
+# ---- selinux domain helpers: selinux_cred/current_sid/__security_secid_to_secctx are 5.x+
+#      internal APIs. On 4.9 return false (KSU su/auth does not depend on domain check).
+_domain_old = '''bool is_task_ksu_domain(const struct cred *cred)
+{
+    struct lsm_context ctx;
+    bool result;
+    if (!cred) {
+        return false;
+    }
+    const struct task_security_struct *tsec = selinux_cred(cred);
+    if (!tsec) {
+        return false;
+    }
+    int err = __security_secid_to_secctx(tsec->sid, &ctx);
+    if (err) {
+        return false;
+    }
+    result = strncmp(KERNEL_SU_DOMAIN, ctx.context, ctx.len) == 0;
+    __security_release_secctx(&ctx);
+    return result;
+}'''
+_domain_new = '''bool is_task_ksu_domain(const struct cred *cred)
+{
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)
+    struct lsm_context ctx;
+    bool result;
+    if (!cred) {
+        return false;
+    }
+    const struct task_security_struct *tsec = selinux_cred(cred);
+    if (!tsec) {
+        return false;
+    }
+    int err = __security_secid_to_secctx(tsec->sid, &ctx);
+    if (err) {
+        return false;
+    }
+    result = strncmp(KERNEL_SU_DOMAIN, ctx.context, ctx.len) == 0;
+    __security_release_secctx(&ctx);
+    return result;
+#else
+    return false;
+#endif
+}'''
+_ss = _ss.replace(_domain_old, _domain_new)
+_ss = _ss.replace('''bool is_ksu_domain()
+{
+    current_sid();
+    return is_task_ksu_domain(current_cred());
+}''', '''bool is_ksu_domain()
+{
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)
+    current_sid();
+#endif
+    return is_task_ksu_domain(current_cred());
+}''')
+_ctx_old = '''bool is_context(const struct cred* cred, const char* context)
+{
+    if (!cred) {
+        return false;
+    }
+    const struct task_security_struct * tsec = selinux_cred(cred);
+    if (!tsec) {
+        return false;
+    }
+    struct lsm_context ctx;
+    bool result;
+    int err = __security_secid_to_secctx(tsec->sid, &ctx);
+    if (err) {
+        return false;
+    }
+    result = strncmp(context, ctx.context, ctx.len) == 0;
+    __security_release_secctx(&ctx);'''
+_ctx_new = '''bool is_context(const struct cred* cred, const char* context)
+{
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 4, 0)
+    return false;
+#else
+    if (!cred) {
+        return false;
+    }
+    const struct task_security_struct * tsec = selinux_cred(cred);
+    if (!tsec) {
+        return false;
+    }
+    struct lsm_context ctx;
+    bool result;
+    int err = __security_secid_to_secctx(tsec->sid, &ctx);
+    if (err) {
+        return false;
+    }
+    result = strncmp(context, ctx.context, ctx.len) == 0;
+    __security_release_secctx(&ctx);
+#endif'''
+_ss = _ss.replace(_ctx_old, _ctx_new)
 open(os.path.join(BASE, _sel), 'w', encoding='utf-8', newline='\n').write(_ss)
 print('patched selinux/selinux.c')
 
 # ---- selinux/sepolicy.c + rules.c: 5.x+ policydb internals - stub out on 4.9
 open(os.path.join(BASE, 'selinux/sepolicy.c'), 'w', encoding='utf-8', newline='\n').write(
 '#include <linux/kernel.h>\n#include <linux/errno.h>\n#include <linux/uaccess.h>\n'
-'int handle_sepolicy(unsigned long arg3, void __user *arg4) { return -EOPNOTSUPP; }\n')
+'#include "selinux.h"\n'
+'int handle_sepolicy(unsigned long arg3, void __user *arg4) { return -EOPNOTSUPP; }\n'
+'void apply_kernelsu_rules(void) {}\n')
 patch_file('Makefile', 'kernelsu-objs += selinux/rules.o\n', '')
 
 # 4.9 fsnotify_alloc_group takes one arg (no flags) - the code already #if's on 6.0, fine.
