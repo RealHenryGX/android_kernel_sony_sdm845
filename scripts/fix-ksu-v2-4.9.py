@@ -197,28 +197,10 @@ _ss = _ss.replace('''bool is_ksu_domain()
 #endif
     return is_task_ksu_domain(current_cred());
 }''')
-_ctx_old = '''bool is_context(const struct cred* cred, const char* context)
+_ss = _re.sub(r'bool is_context\(const struct cred\* cred, const char\* context\)\n\{.*?\n\}\n',
+'''bool is_context(const struct cred* cred, const char* context)
 {
-    if (!cred) {
-        return false;
-    }
-    const struct task_security_struct * tsec = selinux_cred(cred);
-    if (!tsec) {
-        return false;
-    }
-    struct lsm_context ctx;
-    bool result;
-    int err = __security_secid_to_secctx(tsec->sid, &ctx);
-    if (err) {
-        return false;
-    }
-    result = strncmp(context, ctx.context, ctx.len) == 0;
-    __security_release_secctx(&ctx);'''
-_ctx_new = '''bool is_context(const struct cred* cred, const char* context)
-{
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 4, 0)
-    return false;
-#else
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)
     if (!cred) {
         return false;
     }
@@ -234,8 +216,12 @@ _ctx_new = '''bool is_context(const struct cred* cred, const char* context)
     }
     result = strncmp(context, ctx.context, ctx.len) == 0;
     __security_release_secctx(&ctx);
-#endif'''
-_ss = _ss.replace(_ctx_old, _ctx_new)
+    return result;
+#else
+    return false;
+#endif
+}
+''', _ss, count=1, flags=_re.S)
 open(os.path.join(BASE, _sel), 'w', encoding='utf-8', newline='\n').write(_ss)
 print('patched selinux/selinux.c')
 
