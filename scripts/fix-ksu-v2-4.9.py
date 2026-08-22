@@ -143,7 +143,7 @@ _ss = _ss.replace('    return security_release_secctx(cp->context, cp->len);',
 
 # ---- selinux domain helpers: selinux_cred/current_sid/__security_secid_to_secctx are 5.x+
 #      internal APIs. On 4.9 return false (KSU su/auth does not depend on domain check).
-_domain_old = '''bool is_task_ksu_domain(const struct cred *cred)
+_domain_old = '''bool is_task_ksu_domain(const struct cred* cred)
 {
     struct lsm_context ctx;
     bool result;
@@ -162,7 +162,7 @@ _domain_old = '''bool is_task_ksu_domain(const struct cred *cred)
     __security_release_secctx(&ctx);
     return result;
 }'''
-_domain_new = '''bool is_task_ksu_domain(const struct cred *cred)
+_domain_new = '''bool is_task_ksu_domain(const struct cred* cred)
 {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)
     struct lsm_context ctx;
@@ -224,6 +224,56 @@ _ss = _re.sub(r'bool is_context\(const struct cred\* cred, const char\* context\
 ''', _ss, count=1, flags=_re.S)
 open(os.path.join(BASE, _sel), 'w', encoding='utf-8', newline='\n').write(_ss)
 print('patched selinux/selinux.c')
+
+# ---- kernel_umount.c: path_umount is 5.11+ (4.9 has do_umount with fs-internal struct mount) - no-op on 4.9
+_kum = open(os.path.join(BASE, 'kernel_umount.c'), encoding='utf-8', errors='replace').read()
+_kum = _kum.replace('''extern int path_umount(struct path *path, int flags);
+
+static void ksu_umount_mnt(struct path *path, int flags)
+{
+    int err = path_umount(path, flags);
+    if (err) {
+        pr_info("umount %s failed: %d\n", path->dentry->d_iname, err);
+    }
+}''', '''#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 11, 0)
+extern int path_umount(struct path *path, int flags);
+#else
+static int ksu_path_umount_49(struct path *path, int flags) { return -EOPNOTSUPP; }
+#define path_umount ksu_path_umount_49
+#endif
+
+static void ksu_umount_mnt(struct path *path, int flags)
+{
+    int err = path_umount(path, flags);
+    if (err) {
+        pr_info("umount %s failed: %d\n", path->dentry->d_iname, err);
+    }
+}''')
+open(os.path.join(BASE, 'kernel_umount.c'), 'w', encoding='utf-8', newline='\n').write(_kum)
+print('patched kernel_umount.c')
+
+# ---- supercalls.c: 4.9 API fallbacks (anon_inode_getfd, inode->i_security, __close_fd)
+patch_file('supercalls.c', '''#else
+#define getfd_secure anon_inode_getfd_secure
+#endif''', '''#elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 1, 0)
+#define getfd_secure anon_inode_getfd_secure
+#else
+#define getfd_secure anon_inode_getfd
+#endif''')
+patch_file('supercalls.c', '''    struct inode_security_struct *sec = selinux_inode(wrapper_inode);
+    if (sec) {
+        sec->sid = ksu_file_sid;
+    }''', '''#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 1, 0)
+    struct inode_security_struct *sec = selinux_inode(wrapper_inode);
+    if (sec) {
+        sec->sid = ksu_file_sid;
+    }
+#endif''')
+patch_file('supercalls.c', '''#else
+        ksys_close(fd);
+#endif''', '''#else
+        __close_fd(current->files, fd);
+#endif''')
 
 # ---- selinux/sepolicy.c + rules.c: 5.x+ policydb internals - stub out on 4.9
 open(os.path.join(BASE, 'selinux/sepolicy.c'), 'w', encoding='utf-8', newline='\n').write(
