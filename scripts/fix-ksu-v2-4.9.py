@@ -85,6 +85,57 @@ print('patched file_wrapper.c')
 # ---- ksud.c: strncpy_from_user_nofault is 5.x+; 4.9 uses strncpy_from_user
 patch_file('ksud.c', 'strncpy_from_user_nofault', 'strncpy_from_user')
 
+# ---- selinux/selinux.c: selinux_state global is 5.x+; 4.9 no-op setenforce/getenforce=true
+_sel = 'selinux/selinux.c'
+_ss = open(os.path.join(BASE, _sel), encoding='utf-8', errors='replace').read()
+_ss = _ss.replace('''void setenforce(bool enforce)
+{
+#ifdef CONFIG_SECURITY_SELINUX_DEVELOP
+    selinux_state.enforcing = enforce;
+#endif
+}''', '''void setenforce(bool enforce)
+{
+#ifdef CONFIG_SECURITY_SELINUX_DEVELOP
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 1, 0)
+    selinux_state.enforcing = enforce;
+#endif
+#endif
+}''')
+_ss = _ss.replace('''bool getenforce()
+{
+#ifdef CONFIG_SECURITY_SELINUX_DISABLE
+    if (selinux_state.disabled) {
+        return false;
+    }
+#endif
+
+#ifdef CONFIG_SECURITY_SELINUX_DEVELOP
+    return selinux_state.enforcing;
+#else
+    return true;
+#endif
+}''', '''bool getenforce()
+{
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 1, 0)
+#ifdef CONFIG_SECURITY_SELINUX_DISABLE
+    if (selinux_state.disabled) {
+        return false;
+    }
+#endif
+#ifdef CONFIG_SECURITY_SELINUX_DEVELOP
+    return selinux_state.enforcing;
+#else
+    return true;
+#endif
+#else
+    return true;
+#endif
+}''')
+_ss = _ss.replace('    return security_release_secctx(cp->context, cp->len);',
+                  '    security_release_secctx(cp->context, cp->len);')
+open(os.path.join(BASE, _sel), 'w', encoding='utf-8', newline='\n').write(_ss)
+print('patched selinux/selinux.c')
+
 # 4.9 fsnotify_alloc_group takes one arg (no flags) - the code already #if's on 6.0, fine.
 
 if errors:
