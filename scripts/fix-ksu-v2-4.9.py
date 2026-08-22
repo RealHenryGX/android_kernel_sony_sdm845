@@ -57,6 +57,28 @@ patch_file('setuid_hook.c',
            '            ksu_seccomp_allow_cache(current->seccomp.filter, __NR_reboot);\n',
            '            /* 4.9: seccomp_cache disabled */\n')
 
+# ---- file_wrapper.c: 4.9 file_operations lacks remap_file_range/fadvise/iopoll/mmap_supported_flags
+import re as _re
+_fw = 'file_wrapper.c'
+_s = open(os.path.join(BASE, _fw), encoding='utf-8', errors='replace').read()
+# drop the two 5.x-only wrapper functions (remap_file_range, fadvise)
+_s = _re.sub(r'static loff_t ksu_wrapper_remap_file_range.*?\n\}\n\n', '', _s, flags=_re.S)
+_s = _re.sub(r'static int ksu_wrapper_fadvise.*?\n\}\n\n', '', _s, flags=_re.S)
+# drop 5.x-only fops assignments in ksu_create_file_wrapper
+_s = _s.replace('\tp->ops.iopoll = fp->f_op->iopoll ? ksu_wrapper_iopoll : NULL;\n', '')
+_s = _s.replace('''#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)
+	p->ops.fop_flags = fp->f_op->fop_flags;
+#else
+	p->ops.mmap_supported_flags = fp->f_op->mmap_supported_flags;
+#endif
+''', '')
+_s = _s.replace('\tp->ops.remap_file_range = fp->f_op->remap_file_range ? ksu_wrapper_remap_file_range : NULL;\n', '')
+_s = _s.replace('\tp->ops.fadvise = fp->f_op->fadvise ? ksu_wrapper_fadvise : NULL;\n', '')
+# drop the iopoll wrapper function if present (unused on 4.9 -> -Wunused-function)
+_s = _re.sub(r'static int ksu_wrapper_iopoll.*?\n\}\n\n', '', _s, flags=_re.S)
+open(os.path.join(BASE, _fw), 'w', encoding='utf-8', newline='\n').write(_s)
+print('patched file_wrapper.c')
+
 # 4.9 fsnotify_alloc_group takes one arg (no flags) - the code already #if's on 6.0, fine.
 
 if errors:
