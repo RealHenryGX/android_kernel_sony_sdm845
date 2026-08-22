@@ -258,7 +258,7 @@ patch_file('supercalls.c', '''#else
 #endif''', '''#elif LINUX_VERSION_CODE >= KERNEL_VERSION(5, 1, 0)
 #define getfd_secure anon_inode_getfd_secure
 #else
-#define getfd_secure anon_inode_getfd
+#define getfd_secure(name, fops, priv, flags, cred) anon_inode_getfd(name, fops, priv, flags)
 #endif''')
 patch_file('supercalls.c', '''    struct inode_security_struct *sec = selinux_inode(wrapper_inode);
     if (sec) {
