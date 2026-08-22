@@ -136,6 +136,12 @@ _ss = _ss.replace('    return security_release_secctx(cp->context, cp->len);',
 open(os.path.join(BASE, _sel), 'w', encoding='utf-8', newline='\n').write(_ss)
 print('patched selinux/selinux.c')
 
+# ---- selinux/sepolicy.c + rules.c: 5.x+ policydb internals - stub out on 4.9
+open(os.path.join(BASE, 'selinux/sepolicy.c'), 'w', encoding='utf-8', newline='\n').write(
+'#include <linux/kernel.h>\n#include <linux/errno.h>\n#include <linux/uaccess.h>\n'
+'int handle_sepolicy(unsigned long arg3, void __user *arg4) { return -ENOTSUP; }\n')
+patch_file('Makefile', 'kernelsu-objs += selinux/rules.o\n', '')
+
 # 4.9 fsnotify_alloc_group takes one arg (no flags) - the code already #if's on 6.0, fine.
 
 if errors:
