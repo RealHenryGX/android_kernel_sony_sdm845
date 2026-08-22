@@ -74,8 +74,7 @@ _s = _s.replace('''#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)
 ''', '')
 _s = _s.replace('\tp->ops.remap_file_range = fp->f_op->remap_file_range ? ksu_wrapper_remap_file_range : NULL;\n', '')
 _s = _s.replace('\tp->ops.fadvise = fp->f_op->fadvise ? ksu_wrapper_fadvise : NULL;\n', '')
-# drop the iopoll wrapper function if present (unused on 4.9 -> -Wunused-function)
-_s = _re.sub(r'static int ksu_wrapper_iopoll.*?\n\}\n\n', '', _s, flags=_re.S)
+# iopoll wrapper fn stays inside #if LINUX_VERSION_CODE >= 6.1 - not compiled on 4.9, no unused warning
 open(os.path.join(BASE, _fw), 'w', encoding='utf-8', newline='\n').write(_s)
 print('patched file_wrapper.c')
 
