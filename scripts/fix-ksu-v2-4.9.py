@@ -233,9 +233,11 @@ static void ksu_umount_mnt(struct path *path, int flags)
 {
     int err = path_umount(path, flags);
     if (err) {
-        pr_info("umount %s failed: %d\n", path->dentry->d_iname, err);
+        pr_info("umount %s failed: %d\\n", path->dentry->d_iname, err);
     }
-}''', '''#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 11, 0)
+}
+
+''', '''#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 11, 0)
 extern int path_umount(struct path *path, int flags);
 #else
 static int ksu_path_umount_49(struct path *path, int flags) { return -EOPNOTSUPP; }
@@ -246,7 +248,7 @@ static void ksu_umount_mnt(struct path *path, int flags)
 {
     int err = path_umount(path, flags);
     if (err) {
-        pr_info("umount %s failed: %d\n", path->dentry->d_iname, err);
+        pr_info("umount %s failed: %d\\n", path->dentry->d_iname, err);
     }
 }''')
 open(os.path.join(BASE, 'kernel_umount.c'), 'w', encoding='utf-8', newline='\n').write(_kum)
