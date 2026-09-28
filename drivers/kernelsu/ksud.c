@@ -24,8 +24,22 @@
 #include "arch.h"
 #include "klog.h" // IWYU pragma: keep
 #include "ksud.h"
+#include <linux/kmod.h>
 #include "kernel_compat.h"
 #include "selinux/selinux.h"
+
+// 由内核直接拉起 ksud（绕开 init 的 rc exec —— 本 ROM 上被静默跳过）
+static void ksu_run_ksud_post_fs_data(struct work_struct *work);
+static DECLARE_WORK(ksu_ksud_work, ksu_run_ksud_post_fs_data);
+
+static void ksu_run_ksud_post_fs_data(struct work_struct *work)
+{
+	static char *argv[] = { (char *)KSUD_PATH, "post-fs-data", NULL };
+	static char *envp[] = { "HOME=/", "PATH=/sbin:/system/bin:/system/xbin",
+				NULL };
+	int ret = call_usermodehelper(argv[0], argv, envp, UMH_WAIT_PROC);
+	pr_info("KernelSU: kernel-run ksud post-fs-data -> %d\n", ret);
+}
 
 static const char KERNEL_SU_RC[] =
 	"\n"
@@ -289,6 +303,7 @@ int ksu_handle_execveat_ksud(int *fd, struct filename **filename_ptr,
 		pr_info("exec app_process, /data prepared, second_stage: %d\n",
 			init_second_stage_executed);
 		ksu_on_post_fs_data(); // we keep this for old ksud
+		schedule_work(&ksu_ksud_work);
 		stop_execve_hook();
 	}
 
