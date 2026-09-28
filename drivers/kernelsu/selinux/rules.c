@@ -89,14 +89,10 @@ void ksu_apply_kernelsu_rules()
 	ksu_allow(db, "kernel", "system_data_file", "dir", ALL);
 	// our ksud triggered by init
 	ksu_allow(db, "init", "adb_data_file", "file", ALL);
-	// usermode helper 跑在 kernel 域，需要能建目录并挂载 overlayfs
-	ksu_allow(db, "kernel", ALL, "dir", ALL);
-	ksu_allow(db, "kernel", ALL, "filesystem", ALL);
 	// domain transition 到 su 时，entrypoint 检查针对的是 *目标域* su；
 	// 上游只给了 init 侧权限，ROM 策略里 su->adb_data_file:file entrypoint 缺失，
 	// 导致 init 执行 /data/adb/ksud 时被拒（EACCES）。这里补齐。
 	ksu_allow(db, "su", "adb_data_file", "file", "entrypoint");
-	ksu_allow(db, "su", "adb_data_file", "file", ALL);
 	ksu_allow(db, "init", "adb_data_file", "file", "execute");
 	ksu_allow(db, "init", "adb_data_file", "dir", ALL); // #1289
 	ksu_allow(db, "init", KERNEL_SU_DOMAIN, ALL, ALL);

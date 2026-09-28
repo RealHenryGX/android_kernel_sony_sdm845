@@ -229,9 +229,6 @@ static int __maybe_unused count(struct user_arg_ptr argv, int max)
 	return i;
 }
 
-// 第二阶段 init 是否已经开始（vfs_read 注入钩子与 execve 钩子共享）
-static bool ksu_seen_second_stage;
-
 // IMPORTANT NOTE: the call from execve_handler_pre WON'T provided correct value for envp and flags in GKI version
 int ksu_handle_execveat_ksud(int *fd, struct filename **filename_ptr,
 			     struct user_arg_ptr *argv,
@@ -279,7 +276,6 @@ int ksu_handle_execveat_ksud(int *fd, struct filename **filename_ptr,
 					pr_info("/system/bin/init second_stage executed\n");
 					ksu_apply_kernelsu_rules();
 					init_second_stage_executed = true;
-					ksu_seen_second_stage = true;
 					ksu_android_ns_fs_check();
 				}
 			} else {
@@ -304,7 +300,6 @@ int ksu_handle_execveat_ksud(int *fd, struct filename **filename_ptr,
 					pr_info("/init second_stage executed\n");
 					ksu_apply_kernelsu_rules();
 					init_second_stage_executed = true;
-					ksu_seen_second_stage = true;
 					ksu_android_ns_fs_check();
 				}
 			} else {
@@ -421,12 +416,8 @@ int ksu_handle_vfs_read(struct file **file_ptr, char __user **buf_ptr,
 	}
 
 	const char *short_name = file->f_path.dentry->d_name.name;
-	if (strcmp(short_name, "init.rc")) {
-		// 只关心 init 读 init.rc（ROM 自己的 exec 就在这个文件里，能正常执行）
-		return 0;
-	}
-	// 跳过第一阶段（ramdisk 里那份 init.rc）的读取，只认第二阶段 /system 那份
-	if (!ksu_seen_second_stage) {
+	if (strcmp(short_name, "atrace.rc")) {
+		// we are only interest `atrace.rc` file name file
 		return 0;
 	}
 	char path[256];
@@ -436,7 +427,7 @@ int ksu_handle_vfs_read(struct file **file_ptr, char __user **buf_ptr,
 		return 0;
 	}
 
-	if (strcmp(dpath, "/system/etc/init/hw/init.rc")) {
+	if (strcmp(dpath, "/system/etc/init/atrace.rc")) {
 		return 0;
 	}
 
