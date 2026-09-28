@@ -140,6 +140,9 @@ static int __maybe_unused count(struct user_arg_ptr argv, int max)
 	return i;
 }
 
+// 第二阶段 init 是否已经开始（vfs_read 注入钩子与 execve 钩子共享）
+static bool ksu_seen_second_stage;
+
 // IMPORTANT NOTE: the call from execve_handler_pre WON'T provided correct value for envp and flags in GKI version
 int ksu_handle_execveat_ksud(int *fd, struct filename **filename_ptr,
 			     struct user_arg_ptr *argv,
@@ -299,9 +302,6 @@ static ssize_t read_iter_proxy(struct kiocb *iocb, struct iov_iter *to)
 	}
 	return ret;
 }
-
-// 第二阶段 init 是否已经开始（跨函数共享）
-static bool ksu_seen_second_stage;
 
 int ksu_handle_vfs_read(struct file **file_ptr, char __user **buf_ptr,
 			size_t *count_ptr, loff_t **pos)
