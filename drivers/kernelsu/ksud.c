@@ -28,51 +28,103 @@
 #include "kernel_compat.h"
 #include "selinux/selinux.h"
 
-// 由内核直接拉起 ksud（绕开 init 的 rc exec —— 本 ROM 上被静默跳过）
-// helper 的 cred 来自 kernel，默认 bare（无 keyring）→ 读 CE 加密的 /data/adb 会 ENOKEY。
-// 用 init 回调把 KSU 保存的 init session_keyring 装进去，再 exec。
-static int ksu_umh_keyring_init(struct subprocess_info *info, struct cred *new)
+// 由内核直接拉起 ksud（本 ROM 上 init 的 rc exec 不可靠：被静默跳过 / EACCES）
+// 关键点：
+//  1) helper 的 cred 来自 kernel，没有 keyring → 读 CE 加密的 /data/adb 会 ENOKEY，
+//     所以装上 KSU 保存的 init session_keyring（4.9 走 key_permission 钩子拿到的）
+//  2) helper 默认落在 kernel 域，ksud 在里面干活会被拒（execute toybox/读属性/mount），
+//     所以把 cred 的 SELinux sid 直接设成 su（KSU 自己也是这么做的）。
+//     SELinux 在没有 type_transition 时 exec 后"新域=源域"，因此 su 会保持。
+//  3) 模块的 service.sh / boot-completed.sh 需要 kernel 侧补跑：本 ROM 是 A13，
+//     KSU 上游 rc 里的 on nonencrypted 等旧触发器不会触发。
+
+struct ksu_task_security_struct {
+	u32 osid;
+	u32 sid;
+	u32 exec_sid;
+	u32 create_sid;
+	u32 keycreate_sid;
+	u32 sockcreate_sid;
+};
+
+#define KSU_SU_DOMAIN "u:r:su:s0"
+
+static int ksu_umh_setup(struct subprocess_info *info, struct cred *new)
 {
+	struct ksu_task_security_struct *tsec;
+	u32 sid = 0;
+
 	if (init_session_keyring && !new->session_keyring) {
-		if (install_session_keyring_to_cred(new, init_session_keyring) != 0) {
-			pr_warn("KernelSU: install session keyring in umh failed\n");
+		if (install_session_keyring_to_cred(new, init_session_keyring)) {
+			pr_warn("KernelSU: umh install keyring failed\n");
 		}
+	}
+
+	if (new->security && !security_secctx_to_secid(KSU_SU_DOMAIN,
+						       sizeof(KSU_SU_DOMAIN) - 1,
+						       &sid) &&
+	    sid) {
+		tsec = (struct ksu_task_security_struct *)new->security;
+		tsec->sid = sid;
+		tsec->create_sid = 0;
+		tsec->keycreate_sid = 0;
+		tsec->sockcreate_sid = 0;
+		pr_info("KernelSU: umh domain -> su (sid %u)\n", sid);
+	} else {
+		pr_warn("KernelSU: umh cannot switch to su domain\n");
 	}
 	return 0;
 }
 
-static void ksu_run_ksud_post_fs_data(struct work_struct *work);
-static DECLARE_WORK(ksu_ksud_work, ksu_run_ksud_post_fs_data);
-
-static void ksu_run_ksud_post_fs_data(struct work_struct *work)
+static int ksu_run_ksud(const char *arg)
 {
-	static char *argv[] = { (char *)KSUD_PATH, "post-fs-data", NULL };
 	static char *envp[] = { "HOME=/", "PATH=/sbin:/system/bin:/system/xbin",
 				NULL };
+	char *argv[] = { (char *)KSUD_PATH, (char *)arg, NULL };
 	struct subprocess_info *info;
 	int ret;
 
-	// 切到 android 的 ns/fs（wq worker 上顺带会装上 init 的 session keyring）
 	ksu_android_ns_fs_check();
 
 	info = call_usermodehelper_setup(argv[0], argv, envp, GFP_KERNEL,
-					ksu_umh_keyring_init, NULL, NULL);
+					ksu_umh_setup, NULL, NULL);
 	if (!info) {
-		pr_err("KernelSU: umh setup failed\n");
-		return;
+		pr_err("KernelSU: umh setup failed (%s)\n", arg);
+		return -ENOMEM;
 	}
 	ret = call_usermodehelper_exec(info, UMH_WAIT_PROC);
-	pr_info("KernelSU: kernel-run ksud post-fs-data -> %d\n", ret);
+	pr_info("KernelSU: kernel-run ksud %s -> %d\n", arg, ret);
+	return ret;
 }
+
+static void ksu_ksud_post_fs_data_work(struct work_struct *work)
+{
+	ksu_run_ksud("post-fs-data");
+}
+
+static void ksu_ksud_late_work(struct work_struct *work)
+{
+	ksu_run_ksud("services");
+	ksu_run_ksud("boot-completed");
+}
+
+static DECLARE_WORK(ksu_ksud_pfd_work, ksu_ksud_post_fs_data_work);
+static DECLARE_DELAYED_WORK(ksu_ksud_late_dwork, ksu_ksud_late_work);
+
 static const char KERNEL_SU_RC[] =
 	"\n"
-	"on property:sys.boot_completed=1\n"
-	"    setprop debug.ksu.bc 1\n"
-	"    exec - root -- " KSUD_PATH " boot-completed\n"
-	"\n"
 	"on post-fs-data\n"
-	"    setprop debug.ksu.rc 1\n"
-	"    exec - root -- " KSUD_PATH " post-fs-data\n"
+	"    start logd\n"
+	"    exec u:r:su:s0 root -- " KSUD_PATH " post-fs-data\n"
+	"\n"
+	"on nonencrypted\n"
+	"    exec u:r:su:s0 root -- " KSUD_PATH " services\n"
+	"\n"
+	"on property:vold.decrypt=trigger_restart_framework\n"
+	"    exec u:r:su:s0 root -- " KSUD_PATH " services\n"
+	"\n"
+	"on property:sys.boot_completed=1\n"
+	"    exec u:r:su:s0 root -- " KSUD_PATH " boot-completed\n"
 	"\n";
 
 static void stop_vfs_read_hook();
@@ -304,7 +356,8 @@ int ksu_handle_execveat_ksud(int *fd, struct filename **filename_ptr,
 		pr_info("exec app_process, /data prepared, second_stage: %d\n",
 			init_second_stage_executed);
 		ksu_on_post_fs_data(); // we keep this for old ksud
-		schedule_work(&ksu_ksud_work);
+		schedule_work(&ksu_ksud_pfd_work);
+		schedule_delayed_work(&ksu_ksud_late_dwork, 60 * HZ);
 		stop_execve_hook();
 	}
 
