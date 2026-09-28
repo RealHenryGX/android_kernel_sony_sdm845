@@ -29,6 +29,18 @@
 #include "selinux/selinux.h"
 
 // 由内核直接拉起 ksud（绕开 init 的 rc exec —— 本 ROM 上被静默跳过）
+// helper 的 cred 来自 kernel，默认 bare（无 keyring）→ 读 CE 加密的 /data/adb 会 ENOKEY。
+// 用 init 回调把 KSU 保存的 init session_keyring 装进去，再 exec。
+static int ksu_umh_keyring_init(struct subprocess_info *info, struct cred *new)
+{
+	if (init_session_keyring && !new->session_keyring) {
+		if (install_session_keyring_to_cred(new, init_session_keyring) != 0) {
+			pr_warn("KernelSU: install session keyring in umh failed\n");
+		}
+	}
+	return 0;
+}
+
 static void ksu_run_ksud_post_fs_data(struct work_struct *work);
 static DECLARE_WORK(ksu_ksud_work, ksu_run_ksud_post_fs_data);
 
@@ -37,41 +49,30 @@ static void ksu_run_ksud_post_fs_data(struct work_struct *work)
 	static char *argv[] = { (char *)KSUD_PATH, "post-fs-data", NULL };
 	static char *envp[] = { "HOME=/", "PATH=/sbin:/system/bin:/system/xbin",
 				NULL };
-	int ret = call_usermodehelper(argv[0], argv, envp, UMH_WAIT_PROC);
+	struct subprocess_info *info;
+	int ret;
+
+	// 切到 android 的 ns/fs（wq worker 上顺带会装上 init 的 session keyring）
+	ksu_android_ns_fs_check();
+
+	info = call_usermodehelper_setup(argv[0], argv, envp, GFP_KERNEL,
+					ksu_umh_keyring_init, NULL, NULL);
+	if (!info) {
+		pr_err("KernelSU: umh setup failed\n");
+		return;
+	}
+	ret = call_usermodehelper_exec(info, UMH_WAIT_PROC);
 	pr_info("KernelSU: kernel-run ksud post-fs-data -> %d\n", ret);
 }
-
 static const char KERNEL_SU_RC[] =
 	"\n"
 	"on property:sys.boot_completed=1\n"
-	"    setprop debug.ksu.t 1\n"
-	"\n"
-	"on property:debug.ksu.t=1\n"
-	"    exec u:r:su:s0 -- /system/bin/toybox id\n"
-	"    setprop debug.ksu.t 2\n"
-	"\n"
-	"on property:debug.ksu.t=2\n"
-	"    exec - root -- /system/bin/toybox id\n"
-	"    setprop debug.ksu.t 3\n"
-	"\n"
-	"on property:debug.ksu.t=3\n"
-	"    exec - root -- /data/local/tmp/toybox id\n"
-	"    setprop debug.ksu.t 4\n"
-	"\n"
-	"on property:debug.ksu.t=4\n"
-	"    exec - root -- /data/adb/toybox_test id\n"
-	"    setprop debug.ksu.t 5\n"
-	"\n"
-	"on property:debug.ksu.t=5\n"
-	"    exec u:r:su:s0 -- /data/adb/toybox_test id\n"
-	"    setprop debug.ksu.t 6\n"
-	"\n"
-	"on property:debug.ksu.t=6\n"
-	"    exec u:r:su:s0 -- " KSUD_PATH " boot-completed\n"
-	"    setprop debug.ksu.t 7\n"
+	"    setprop debug.ksu.bc 1\n"
+	"    exec - root -- " KSUD_PATH " boot-completed\n"
 	"\n"
 	"on post-fs-data\n"
 	"    setprop debug.ksu.rc 1\n"
+	"    exec - root -- " KSUD_PATH " post-fs-data\n"
 	"\n";
 
 static void stop_vfs_read_hook();
