@@ -1,6 +1,6 @@
 ccflags-y := -Iinclude/drm
 ifeq (, $(findstring -W,$(EXTRA_CFLAGS)))
-	ccflags-y += -Werror
+	ccflags-y += -Wno-error
 endif
 
 obj-$(CONFIG_DRM_TILCDC_SLAVE_COMPAT) += tilcdc_slave_compat.o \

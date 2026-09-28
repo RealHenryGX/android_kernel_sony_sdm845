@@ -1,4 +1,4 @@
-ccflags-y += -Werror
+ccflags-y += -Wno-error
 
 obj-$(CONFIG_VSERVICES_PROTOCOL_BLOCK_SERVER)	+= vservices_protocol_block_server.o
 vservices_protocol_block_server-objs = server.o

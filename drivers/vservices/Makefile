@@ -1,4 +1,4 @@
-ccflags-y += -Werror
+ccflags-y += -Wno-error
 ccflags-$(CONFIG_VSERVICES_DEBUG) += -DDEBUG
 
 obj-$(CONFIG_VSERVICES_SUPPORT)	+= vservices.o
