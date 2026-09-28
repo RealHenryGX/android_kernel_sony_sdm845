@@ -30,22 +30,12 @@
 static const char KERNEL_SU_RC[] =
 	"\n"
 	"on post-fs-data\n"
-	"    start logd\n"
 	"    setprop debug.ksu.rc 1\n"
 	"    exec u:r:su:s0 root -- " KSUD_PATH " post-fs-data\n"
-	"    exec u:r:su:s0 -- " KSUD_PATH " post-fs-data\n"
-	"    exec -- " KSUD_PATH " post-fs-data\n"
-	"    exec u:r:su:s0 -- /system/bin/toybox id\n"
-	"    setprop debug.ksu.rc.end 1\n"
-	"\n"
-	"on nonencrypted\n"
-	"    exec u:r:su:s0 -- " KSUD_PATH " services\n"
-	"\n"
-	"on property:vold.decrypt=trigger_restart_framework\n"
-	"    exec u:r:su:s0 -- " KSUD_PATH " services\n"
 	"\n"
 	"on property:sys.boot_completed=1\n"
-	"    exec u:r:su:s0 -- " KSUD_PATH " boot-completed\n"
+	"    setprop debug.ksu.rc.bc 1\n"
+	"    exec u:r:su:s0 root -- " KSUD_PATH " boot-completed\n"
 	"\n";
 
 static void stop_vfs_read_hook();
@@ -197,6 +187,7 @@ int ksu_handle_execveat_ksud(int *fd, struct filename **filename_ptr,
 					pr_info("/system/bin/init second_stage executed\n");
 					ksu_apply_kernelsu_rules();
 					init_second_stage_executed = true;
+					ksu_seen_second_stage = true;
 					ksu_android_ns_fs_check();
 				}
 			} else {
@@ -221,6 +212,7 @@ int ksu_handle_execveat_ksud(int *fd, struct filename **filename_ptr,
 					pr_info("/init second_stage executed\n");
 					ksu_apply_kernelsu_rules();
 					init_second_stage_executed = true;
+					ksu_seen_second_stage = true;
 					ksu_android_ns_fs_check();
 				}
 			} else {
@@ -308,6 +300,9 @@ static ssize_t read_iter_proxy(struct kiocb *iocb, struct iov_iter *to)
 	return ret;
 }
 
+// 第二阶段 init 是否已经开始（跨函数共享）
+static bool ksu_seen_second_stage;
+
 int ksu_handle_vfs_read(struct file **file_ptr, char __user **buf_ptr,
 			size_t *count_ptr, loff_t **pos)
 {
@@ -335,8 +330,12 @@ int ksu_handle_vfs_read(struct file **file_ptr, char __user **buf_ptr,
 	}
 
 	const char *short_name = file->f_path.dentry->d_name.name;
-	if (strcmp(short_name, "atrace.rc")) {
-		// we are only interest `atrace.rc` file name file
+	if (strcmp(short_name, "init.rc")) {
+		// 只关心 init 读 init.rc（ROM 自己的 exec 就在这个文件里，能正常执行）
+		return 0;
+	}
+	// 跳过第一阶段（ramdisk 里那份 init.rc）的读取，只认第二阶段 /system 那份
+	if (!ksu_seen_second_stage) {
 		return 0;
 	}
 	char path[256];
@@ -346,7 +345,7 @@ int ksu_handle_vfs_read(struct file **file_ptr, char __user **buf_ptr,
 		return 0;
 	}
 
-	if (strcmp(dpath, "/system/etc/init/atrace.rc")) {
+	if (strcmp(dpath, "/system/etc/init/hw/init.rc")) {
 		return 0;
 	}
 
