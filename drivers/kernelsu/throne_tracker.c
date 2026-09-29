@@ -357,7 +357,7 @@ void ksu_track_throne()
 			ksu_invalidate_manager_uid();
 		}
 		pr_info("Searching manager...\n");
-		search_manager("/data/app", 2, &uid_list);
+		search_manager("/data/app", 3, &uid_list);
 		pr_info("Search manager finished\n");
 	}
 
