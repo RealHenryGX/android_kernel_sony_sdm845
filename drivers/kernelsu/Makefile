@@ -129,3 +129,6 @@ $(info -- You have not integrate susfs in your kernel.)
 $(info -- Read: https://gitlab.com/simonpunk/susfs4ksu)
 endif
 # Keep a new line here!! Because someone may append config
+# Gravity_Ext: vendored 到 drivers/kernelsu/（目录里没有 .git），版本号写死。
+# 不写死会 fallback 到 16，管理器会判定「内核不支持」。v0.9.5 官方版本码 = 11872。
+ccflags-y += -DKSU_VERSION=11872
